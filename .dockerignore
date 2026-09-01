@@ -84,6 +84,7 @@ data/
 **/data/**
 *.pdf
 **/*.pdf
+*with_answers*
 *ground_truth*
 **/*ground_truth*
 *answer*.json
