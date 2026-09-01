@@ -1,0 +1,173 @@
+{
+  "title": "Epilepsy corpus manifest record",
+  "description": "Draft 2020-12 compatible JSON Schema for one body-free JSONL record.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "corpus_version",
+    "converter_version",
+    "source_version",
+    "pmcid",
+    "pmid",
+    "doi",
+    "title",
+    "authors",
+    "source",
+    "retrieved_at",
+    "license",
+    "raw",
+    "canonical",
+    "partition",
+    "status",
+    "error_code",
+    "aliases"
+  ],
+  "properties": {
+    "schema_version": {"type": "string", "const": "1.0.0"},
+    "corpus_version": {"type": "string", "const": "epilepsy_corpus_v1"},
+    "converter_version": {"type": "string", "const": "1.0.0"},
+    "source_version": {"type": "string", "const": "europe_pmc_rest_v1"},
+    "pmcid": {"type": "string", "pattern": "^PMC[0-9]+$"},
+    "pmid": {"type": ["string", "null"]},
+    "doi": {"type": ["string", "null"]},
+    "title": {"type": "string", "minLength": 1},
+    "authors": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "source": {"$ref": "#/$defs/source"},
+    "retrieved_at": {"type": "string", "format": "date-time"},
+    "license": {
+      "oneOf": [
+        {"$ref": "#/$defs/license"},
+        {"type": "null"}
+      ]
+    },
+    "raw": {
+      "oneOf": [
+        {"$ref": "#/$defs/artifact"},
+        {"type": "null"}
+      ]
+    },
+    "canonical": {
+      "oneOf": [
+        {"$ref": "#/$defs/artifact"},
+        {"type": "null"}
+      ]
+    },
+    "partition": {"type": "string", "const": "demo_kb"},
+    "status": {
+      "type": "string",
+      "enum": ["active", "normalized", "failed", "rejected"]
+    },
+    "error_code": {"type": ["string", "null"]},
+    "aliases": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/alias"}
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"status": {"enum": ["active", "normalized"]}},
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "license": {"$ref": "#/$defs/license"},
+          "raw": {"$ref": "#/$defs/artifact"},
+          "canonical": {"$ref": "#/$defs/artifact"},
+          "error_code": {"type": "null"}
+        }
+      },
+      "else": {
+        "properties": {
+          "license": {"type": "null"},
+          "canonical": {"type": "null"},
+          "error_code": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "api_base",
+        "full_text_url",
+        "terms_url",
+        "copyright_url",
+        "documentation_url"
+      ],
+      "properties": {
+        "provider": {"type": "string", "const": "Europe PMC"},
+        "api_base": {
+          "type": "string",
+          "const": "https://www.ebi.ac.uk/europepmc/webservices/rest"
+        },
+        "full_text_url": {
+          "type": "string",
+          "pattern": "^https://www\\.ebi\\.ac\\.uk/europepmc/webservices/rest/PMC[0-9]+/fullTextXML$"
+        },
+        "terms_url": {
+          "type": "string",
+          "const": "https://europepmc.org/PrivacyNotice"
+        },
+        "copyright_url": {
+          "type": "string",
+          "const": "https://europepmc.org/Copyright"
+        },
+        "documentation_url": {
+          "type": "string",
+          "const": "https://europepmc.org/RestfulWebService"
+        }
+      }
+    },
+    "license": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["spdx", "url", "declaration_sha256"],
+      "properties": {
+        "spdx": {
+          "type": "string",
+          "enum": ["CC0-1.0", "CC-BY-2.0", "CC-BY-2.5", "CC-BY-3.0", "CC-BY-4.0"]
+        },
+        "url": {"type": "string", "format": "uri"},
+        "declaration_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "size", "sha256"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "not": {"pattern": "(^/|^[A-Za-z]:|(^|/)\\.\\.(/|$)|\\\\)"}
+        },
+        "size": {"type": "integer", "minimum": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "alias": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pmcid", "pmid", "doi"],
+      "properties": {
+        "pmcid": {"type": ["string", "null"], "pattern": "^PMC[0-9]+$"},
+        "pmid": {"type": ["string", "null"]},
+        "doi": {"type": ["string", "null"]}
+      },
+      "anyOf": [
+        {"properties": {"pmcid": {"type": "string"}}},
+        {"properties": {"pmid": {"type": "string"}}},
+        {"properties": {"doi": {"type": "string"}}}
+      ]
+    }
+  }
+}

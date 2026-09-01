@@ -1,0 +1,95 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+!**/.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+
+# Local project tooling
+.tools/
+
+htmlcov/
+coverage.xml
+*.egg-info/
+build/
+dist/
+
+# JavaScript / frontend
+node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
+*.tsbuildinfo
+
+# Runtime logs and temporary files
+*.log
+*.tmp
+*.temp
+*.bak
+.cache/
+tmp/
+
+# Local databases, object/vector stores, and container volumes
+.volumes/
+volumes/
+postgres_data/
+qdrant_storage/
+minio_data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Models and generated ML artifacts
+models/**/*.bin
+models/**/*.pt
+models/**/*.pth
+models/**/*.onnx
+models/**/*.safetensors
+models/**/*.gguf
+models/**/snapshots/
+
+# Knowledge corpus and derived artifacts are local-only by default
+data/**
+!data/manifests/
+!data/manifests/**
+!data/fixtures/
+!data/fixtures/**
+!data/jieba_user_dict.txt
+
+# Private evaluation answers and generated reports
+eval_with_answers.json
+*_with_answers*.json
+*_ground_truth*.json
+*_benchmark.json
+reports/private/
+reports/generated/
+public_eval/generated/
+
+# Legacy one-off artifacts
+body.json
+=1.2.10
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# OCR local artifacts
+ocr_output/

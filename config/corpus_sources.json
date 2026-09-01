@@ -1,0 +1,65 @@
+{
+  "schema_version": "1.0.0",
+  "corpus_version": "epilepsy_corpus_v1",
+  "converter_version": "1.0.0",
+  "source_version": "europe_pmc_rest_v1",
+  "provider": "Europe PMC",
+  "api_base": "https://www.ebi.ac.uk/europepmc/webservices/rest",
+  "query": "((TITLE_ABS:epilepsy) OR (TITLE_ABS:seizure)) AND OPEN_ACCESS:Y AND IN_EPMC:Y",
+  "keywords": [
+    "epilepsy",
+    "epileptic",
+    "seizure",
+    "seizures"
+  ],
+  "allowed_hosts": [
+    "www.ebi.ac.uk"
+  ],
+  "allowed_redirect_hosts": [
+    "www.ebi.ac.uk",
+    "ebi.ac.uk"
+  ],
+  "requests_per_second": 3.0,
+  "timeout_seconds": 45.0,
+  "max_response_bytes": 26214400,
+  "download_chunk_bytes": 65536,
+  "page_size": 100,
+  "max_discovery_pages": 50,
+  "candidate_limit": 1200,
+  "candidate_margin": 900,
+  "target_count": 300,
+  "max_retries": 5,
+  "backoff_base_seconds": 1.0,
+  "backoff_max_seconds": 30.0,
+  "jitter_seconds": 0.25,
+  "min_body_chars": 500,
+  "include_references": false,
+  "repository_url": "https://github.com/epilepsy-qa-system/epilepsy-qa-system",
+  "default_user_agent": "epilepsy-qa-system-corpus/1.0 (+https://github.com/epilepsy-qa-system/epilepsy-qa-system)",
+  "terms_url": "https://europepmc.org/PrivacyNotice",
+  "copyright_url": "https://europepmc.org/Copyright",
+  "documentation_url": "https://europepmc.org/RestfulWebService",
+  "license_allowlist": [
+    {
+      "spdx": "CC0-1.0",
+      "url": "https://creativecommons.org/publicdomain/zero/1.0/"
+    },
+    {
+      "spdx": "CC-BY-2.0",
+      "url": "https://creativecommons.org/licenses/by/2.0/"
+    },
+    {
+      "spdx": "CC-BY-2.5",
+      "url": "https://creativecommons.org/licenses/by/2.5/"
+    },
+    {
+      "spdx": "CC-BY-3.0",
+      "url": "https://creativecommons.org/licenses/by/3.0/"
+    },
+    {
+      "spdx": "CC-BY-4.0",
+      "url": "https://creativecommons.org/licenses/by/4.0/"
+    }
+  ],
+  "gate_notice": "Engineering license gate only; this pipeline does not provide legal advice."
+}

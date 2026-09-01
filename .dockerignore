@@ -1,0 +1,92 @@
+# Secrets and local environment files (Compose reads its example from the host).
+.env*
+**/.env*
+**/*.env
+**/*.env*
+
+# Version-control and local tooling metadata.
+.git/
+.gitignore
+.gitattributes
+.tools/
+.vscode/
+.idea/
+
+# Runtime data, private/evaluation material, and source documents.
+data/
+**/data/
+benchmark/
+**/benchmark/
+*benchmark*
+**/*benchmark*
+eval_with_answers*
+**/eval_with_answers*
+**/*with_answers*
+private/
+**/private/
+**/*private_answers*
+**/*answer_key*
+**/*.[pP][dD][fF]
+
+# Local models, weights, and model caches must be mounted at runtime.
+models/
+**/models/
+# A singular root model directory may hold local weights; frontend feature
+# directories named `model/` remain source inputs.
+model/**
+**/*.safetensors
+**/*.pt
+**/*.pth
+**/*.bin
+**/*.onnx
+**/*.gguf
+**/.cache/huggingface/
+
+# Python caches, local environments, and build artifacts.
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+build/
+
+# Frontend dependencies and generated output.
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+
+# Tests and generated reports are not runtime inputs.
+tests/
+coverage/
+**/coverage/
+htmlcov/
+**/htmlcov/
+test-results/
+**/test-results/
+.coverage
+.coverage.*
+coverage.xml
+junit*.xml
+*.log
+
+# Exact fail-closed aliases required by CI policy checks.
+.git
+.env
+.env.*
+**/.env
+**/.env.*
+data/
+**/data/**
+*.pdf
+**/*.pdf
+*ground_truth*
+**/*ground_truth*
+*answer*.json
+**/*answer*.json
+*answer*.jsonl
+**/*answer*.jsonl

@@ -1,0 +1,20 @@
+{
+  "artifact_root": "data/corpus/epilepsy_corpus_v1_smoke",
+  "candidate_limit": 30,
+  "converter_version": "1.0.0",
+  "corpus_version": "epilepsy_corpus_v1",
+  "counts": {
+    "active": 5,
+    "aliases": 0,
+    "records": 23,
+    "rejected": 18,
+    "unique_normalized": 5
+  },
+  "licenses": {
+    "CC-BY-4.0": 5
+  },
+  "manifest_path": "data/manifests/epilepsy_corpus_v1_smoke.jsonl",
+  "schema_version": "1.0.0",
+  "source_version": "europe_pmc_rest_v1",
+  "target": 5
+}

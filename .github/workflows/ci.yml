@@ -1,0 +1,368 @@
+name: CI
+
+"on":
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PIP_NO_INPUT: "1"
+
+jobs:
+  python-quality:
+    name: Python 3.11 quality and offline contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+
+      - name: Install pinned development and runtime dependencies
+        run: |
+          python -m pip install "pip==26.2.1" "setuptools==84.0.0" "wheel==0.48.0"
+          python -m pip install --editable ".[dev,runtime]"
+          python -m pip check
+
+      - name: Ruff lint (app, tests, and maintained scripts)
+        run: >-
+          python -m ruff check app tests scripts/run_public_evaluation.py
+          scripts/corpus_pipeline.py
+
+      - name: Ruff format (app, tests, and maintained scripts)
+        run: >-
+          python -m ruff format --check app tests scripts/run_public_evaluation.py
+          scripts/corpus_pipeline.py
+
+      - name: Mypy
+        run: python -m mypy app tests
+
+      - name: Unit tests only
+        run: python -m pytest tests/unit -m "not slow"
+
+      - name: Public evaluation dry-run (no HTTP or private data)
+        env:
+          PUBLIC_EVAL_BUILD_ID: ${{ github.sha }}
+        run: |
+          report="${RUNNER_TEMP}/public-eval-dry-run.json"
+          python scripts/run_public_evaluation.py \
+            --base-url "https://ci.invalid" \
+            --model-id "ci-public" \
+            --retriever-id "ci-public" \
+            --build-id "${PUBLIC_EVAL_BUILD_ID}" \
+            --dry-run > "${report}"
+          python - "${report}" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          result = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          if not isinstance(result, dict):
+              raise SystemExit("public evaluation dry-run did not emit a JSON object")
+          PY
+
+      - name: Corpus validate contract without downloaded artifacts
+        run: |
+          scratch="$(mktemp -d "${GITHUB_WORKSPACE}/.ci-corpus-validate.XXXXXX")"
+          cleanup() { rm -rf -- "${scratch}"; }
+          trap cleanup EXIT
+
+          set +e
+          python scripts/corpus_pipeline.py validate \
+            --repo-root "${GITHUB_WORKSPACE}" \
+            --config config/corpus_sources.json \
+            --manifest "${scratch}/missing.jsonl" \
+            --summary "${scratch}/unused.summary.json" \
+            --artifact-root "${scratch}/artifacts" \
+            --target 1 \
+            > "${scratch}/report.json" \
+            2> "${scratch}/stderr.log"
+          status=$?
+          set -e
+
+          if [[ "${status}" -ne 2 ]]; then
+            echo "Expected corpus validate to return 2 for a missing clean-checkout manifest; got ${status}." >&2
+            cat "${scratch}/stderr.log" >&2
+            exit 1
+          fi
+          if [[ -s "${scratch}/stderr.log" ]]; then
+            echo "Corpus validate unexpectedly wrote to stderr." >&2
+            cat "${scratch}/stderr.log" >&2
+            exit 1
+          fi
+          python - "${scratch}/report.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          if report.get("ok") is not False:
+              raise SystemExit("missing-manifest validation unexpectedly succeeded")
+          if report.get("errors") != [{"code": "manifest_missing"}]:
+              raise SystemExit(f"unexpected missing-manifest report: {report!r}")
+          PY
+
+  frontend:
+    name: Frontend Node 20.11.0
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Node 20.11.0
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20.11.0"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Verify npm version
+        run: test "$(npm --version)" = "10.2.4"
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Prettier check
+        run: npm run format:check
+
+      - name: TypeScript typecheck
+        run: npm run typecheck
+
+      - name: Vitest run mode
+        run: npm run test -- --run
+
+      - name: Production build
+        run: npm run build
+
+  compose:
+    name: Docker Compose config and build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Detect a Compose definition
+        id: compose
+        shell: bash
+        run: |
+          compose_file=""
+          for candidate in compose.yaml compose.yml docker-compose.yaml docker-compose.yml; do
+            if [[ -L "${candidate}" ]]; then
+              echo "::error::Compose definitions must not be symlinks: ${candidate}"
+              exit 1
+            fi
+            if [[ -f "${candidate}" ]]; then
+              if [[ -n "${compose_file}" ]]; then
+                echo "::error::Multiple base Compose definitions found; select one explicitly in ci.yml."
+                exit 1
+              fi
+              compose_file="${candidate}"
+            fi
+          done
+          if [[ -z "${compose_file}" ]]; then
+            echo "::error::Required base Compose definition is missing."
+            exit 1
+          fi
+          echo "present=true" >> "${GITHUB_OUTPUT}"
+          echo "file=${compose_file}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Python 3.11 for Compose policy checks
+        if: steps.compose.outputs.present == 'true'
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+
+      - name: Validate Compose configuration and build inputs
+        if: steps.compose.outputs.present == 'true'
+        env:
+          COMPOSE_DISABLE_ENV_FILE: "1"
+        run: |
+          compose_file="${{ steps.compose.outputs.file }}"
+          compose_env="config/compose.env.example"
+          if [[ -L "${compose_env}" || ! -f "${compose_env}" ]]; then
+            echo "::error::The committed Compose example env must be a regular file."
+            exit 1
+          fi
+          # Fail closed before Compose can resolve external YAML or environment files. The
+          # broad token check intentionally rejects quoted, explicit-key, and flow-map forms.
+          if grep -Eiq '(^|[^[:alnum:]_])(env_file|include|extends)([^[:alnum:]_]|$)' \
+            "${compose_file}"; then
+            echo "::error::Compose env_file/include/extends requires an explicit security review."
+            exit 1
+          fi
+
+          config_json="${RUNNER_TEMP}/compose-config.json"
+          docker compose --env-file "${compose_env}" -f "${compose_file}" \
+            config --no-env-resolution --format json > "${config_json}"
+          python - "${config_json}" <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          workspace = Path(os.environ["GITHUB_WORKSPACE"]).resolve(strict=True)
+          config = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          required_ignores = {
+              ".git",
+              ".env",
+              ".env.*",
+              "**/.env",
+              "**/.env.*",
+              "data/",
+              "**/data/**",
+              "*.pdf",
+              "**/*.pdf",
+              "*benchmark*",
+              "**/*benchmark*",
+              "*with_answers*",
+              "**/*with_answers*",
+              "*ground_truth*",
+              "**/*ground_truth*",
+              "*answer*.json",
+              "**/*answer*.json",
+              "*answer*.jsonl",
+              "**/*answer*.jsonl",
+          }
+
+          def is_restricted(relative: Path) -> bool:
+              lowered = relative.as_posix().lower()
+              parts = {part.lower() for part in relative.parts}
+              name = relative.name.lower()
+              return (
+                  "data" in parts
+                  or name == ".env"
+                  or name.startswith(".env.")
+                  or name.endswith(".pdf")
+                  or "benchmark" in lowered
+                  or "with_answers" in lowered
+                  or "ground_truth" in lowered
+                  or (
+                      "answer" in name
+                      and (name.endswith(".json") or name.endswith(".jsonl"))
+                  )
+              )
+
+          def confined_path(value: str, *, base: Path, label: str) -> Path:
+              candidate = Path(value)
+              if not candidate.is_absolute():
+                  candidate = base / candidate
+              lexical = Path(os.path.abspath(candidate))
+              try:
+                  relative = lexical.relative_to(workspace)
+              except ValueError as exc:
+                  raise SystemExit(f"{label} must stay inside the checkout") from exc
+
+              current = workspace
+              for part in relative.parts:
+                  current = current / part
+                  if current.is_symlink():
+                      raise SystemExit(f"{label} must not contain symlink components")
+              try:
+                  resolved = lexical.resolve(strict=True)
+                  resolved.relative_to(workspace)
+              except (OSError, ValueError) as exc:
+                  raise SystemExit(f"{label} must be an existing path inside the checkout") from exc
+              if is_restricted(relative):
+                  raise SystemExit(f"{label} points at a restricted path")
+              return resolved
+
+          services = config.get("services")
+          if not isinstance(services, dict):
+              raise SystemExit("Compose config did not contain a services object")
+          for service_name, service in services.items():
+              if not isinstance(service, dict):
+                  raise SystemExit(f"service {service_name!r} has an invalid definition")
+              if service.get("env_file"):
+                  raise SystemExit(f"service {service_name!r} uses a forbidden env_file")
+              build = service.get("build")
+              if not build:
+                  continue
+              if isinstance(build, str):
+                  build = {"context": build}
+              if not isinstance(build, dict):
+                  raise SystemExit(f"service {service_name!r} has an invalid build definition")
+              for unsupported in ("additional_contexts", "secrets", "ssh"):
+                  if build.get(unsupported):
+                      raise SystemExit(
+                          f"service {service_name!r} build.{unsupported} requires security review"
+                      )
+              context = confined_path(
+                  str(build.get("context", ".")),
+                  base=workspace,
+                  label=f"service {service_name!r} build context",
+              )
+              if not context.is_dir():
+                  raise SystemExit(f"service {service_name!r} build context is not a directory")
+
+              ignore_file = context / ".dockerignore"
+              if ignore_file.is_symlink():
+                  raise SystemExit(f"service {service_name!r} .dockerignore must not be a symlink")
+              if not ignore_file.is_file():
+                  raise SystemExit(f"service {service_name!r} build context lacks .dockerignore")
+              ignore_patterns: set[str] = set()
+              for raw_line in ignore_file.read_text(encoding="utf-8").splitlines():
+                  pattern = raw_line.strip()
+                  if not pattern or pattern.startswith("#"):
+                      continue
+                  if pattern.startswith("!"):
+                      raise SystemExit(
+                          f"service {service_name!r} .dockerignore contains a forbidden negation"
+                      )
+                  ignore_patterns.add(pattern)
+              missing = sorted(required_ignores - ignore_patterns)
+              if missing:
+                  raise SystemExit(
+                      f"service {service_name!r} .dockerignore lacks required rules: {missing!r}"
+                  )
+
+              dockerfile = confined_path(
+                  str(build.get("dockerfile", "Dockerfile")),
+                  base=context,
+                  label=f"service {service_name!r} Dockerfile",
+              )
+              if not dockerfile.is_file():
+                  raise SystemExit(f"service {service_name!r} Dockerfile is not a file")
+              dockerfile_ignore = dockerfile.with_name(f"{dockerfile.name}.dockerignore")
+              if dockerfile_ignore.is_symlink() or dockerfile_ignore.exists():
+                  raise SystemExit(
+                      f"service {service_name!r} uses a Dockerfile-specific ignore override"
+                  )
+          PY
+
+      - name: Build Compose services
+        if: steps.compose.outputs.present == 'true'
+        env:
+          COMPOSE_DISABLE_ENV_FILE: "1"
+        run: >-
+          docker compose --env-file config/compose.env.example -f "${{ steps.compose.outputs.file }}"
+          build --pull

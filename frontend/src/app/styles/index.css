@@ -1,0 +1,71 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+:root {
+  color: #16302e;
+  background: #f5faf9;
+  font-family: Inter, 'Noto Sans SC', 'Microsoft YaHei', system-ui, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+* {
+  box-sizing: border-box;
+}
+html {
+  min-width: 320px;
+  background: #f5faf9;
+}
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: radial-gradient(circle at 12% 4%, rgba(20, 184, 166, 0.11), transparent 30rem),
+    linear-gradient(180deg, #f8fcfb 0%, #eef7f6 100%);
+}
+button,
+a,
+textarea,
+input {
+  outline-offset: 3px;
+}
+:focus-visible {
+  outline: 3px solid rgba(3, 105, 161, 0.55);
+}
+#root {
+  min-height: 100vh;
+}
+.markdown-body {
+  color: #24413f;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.markdown-body > :first-child {
+  margin-top: 0;
+}
+.markdown-body > :last-child {
+  margin-bottom: 0;
+}
+.markdown-body a {
+  color: #0369a1;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.markdown-body ul,
+.markdown-body ol {
+  padding-inline-start: 1.4rem;
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+.citation-drawer .ant-drawer-content-wrapper {
+  max-width: 100vw;
+}

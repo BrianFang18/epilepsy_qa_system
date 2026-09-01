@@ -1,0 +1,22 @@
+{
+  "artifact_root": "data/corpus/epilepsy_corpus_v1",
+  "candidate_limit": 1200,
+  "converter_version": "1.0.0",
+  "corpus_version": "epilepsy_corpus_v1",
+  "counts": {
+    "active": 300,
+    "aliases": 0,
+    "failed": 1,
+    "records": 742,
+    "rejected": 441,
+    "unique_normalized": 300
+  },
+  "licenses": {
+    "CC-BY-3.0": 1,
+    "CC-BY-4.0": 299
+  },
+  "manifest_path": "data/manifests/epilepsy_corpus_v1.jsonl",
+  "schema_version": "1.0.0",
+  "source_version": "europe_pmc_rest_v1",
+  "target": 300
+}
