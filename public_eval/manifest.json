@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "dataset_version": "public-smoke-1",
-  "samples_sha256": "260c87b588dc564d96a8346c892029ac945053a3a4dfe948cd52e96703534b69",
+  "samples_sha256": "4385ceabef8416a3af2d8385e3388b6464242916919835abe03c5ab2cc176264",
   "license": "MIT",
   "provenance": "Project-authored MIT synthetic public smoke set; no patient data.",
   "target_endpoint": "/api/v1/chat/stream",

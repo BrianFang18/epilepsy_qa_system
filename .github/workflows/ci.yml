@@ -223,7 +223,7 @@ jobs:
 
           config_json="${RUNNER_TEMP}/compose-config.json"
           docker compose --env-file "${compose_env}" -f "${compose_file}" \
-            config --no-env-resolution --format json > "${config_json}"
+            config --format json > "${config_json}"
           python - "${config_json}" <<'PY'
           import json
           import os

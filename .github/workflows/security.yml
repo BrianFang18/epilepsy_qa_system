@@ -127,9 +127,9 @@ jobs:
           # The scan root cannot contain root .env, data/, PDFs, answer artifacts, or benchmarks.
           echo "path=${scan_root}" >> "${GITHUB_OUTPUT}"
 
-      # Pin the reviewed v0.28.0 release commit; Dependabot tracks updates.
+      # Pin the reviewed v0.36.0 release commit; Dependabot tracks updates.
       - name: Secret scan (Trivy secret scanner; Gitleaks equivalent)
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: ${{ steps.scan-root.outputs.path }}
@@ -138,7 +138,7 @@ jobs:
           exit-code: "1"
 
       - name: Trivy filesystem vulnerability and misconfiguration scan
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: ${{ steps.scan-root.outputs.path }}
