@@ -31,7 +31,7 @@ runtime = [
     "langgraph==1.2.11",
     "langgraph-checkpoint==4.2.0",
     "langgraph-sdk==0.4.4",
-    "openai==2.54.0",
+    "openai==3.6.0",
     "pdfplumber==0.11.10",
     "Pillow==12.3.0",
     "pymupdf==1.25.1",
