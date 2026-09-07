@@ -1,4 +1,4 @@
-FROM python:3.11.11-slim-bookworm AS builder
+FROM python:3.14.7-slim-bookworm AS builder
 
 # Defaults remain the official repositories. Operators on constrained networks may
 # override these values with docker/Compose --build-arg without editing this file.
@@ -37,7 +37,7 @@ RUN python -m pip install \
     && python -m pip check \
     && python -m pip uninstall --yes pip wheel
 
-FROM python:3.11.11-slim-bookworm AS runtime
+FROM python:3.14.7-slim-bookworm AS runtime
 
 ARG DEBIAN_MIRROR=http://deb.debian.org
 
