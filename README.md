@@ -6,6 +6,10 @@ An evidence-aware RAG web application for exploring epilepsy literature and loca
 
 [Quick Start](#quick-start) · [Demo Guide](docs/DEMO.md) · [Architecture](docs/ARCHITECTURE.md) · [Runbook](docs/RUNBOOK.md) · [中文新手指南](BEGINNER_RUN_GUIDE.md)
 
+![Epilepsy QA System overview showing chat, evidence, document ingestion, and evaluation](docs/images/Epilepsy_QA_system.png)
+
+*System overview covering chat, evidence inspection, document ingestion, and evaluation. This image presents the UI; model and clinical quality remain subject to the evaluation boundaries described below.*
+
 ## Overview
 
 Epilepsy QA System brings document ingestion, retrieval, safety-aware routing, and streamed answers into one local web application. Users can upload non-sensitive epilepsy-related material, ask questions in Chinese or English, and inspect the evidence behind each supported answer.
