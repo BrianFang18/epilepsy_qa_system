@@ -3,7 +3,7 @@
 alembic==1.19.1
 argon2-cffi==25.1.0
 minio==7.2.20
-psycopg[binary]==3.3.4
+psycopg[binary]==3.3.5
 python-multipart==0.0.32
 SQLAlchemy==2.0.52
 
