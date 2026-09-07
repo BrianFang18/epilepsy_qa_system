@@ -5,6 +5,8 @@ export interface BackendReadiness {
   status: 'ready' | 'degraded';
   legacy_ready: boolean;
   chat_ready: boolean;
+  chat_mode: 'demo' | 'openai_compatible';
+  model_generation_enabled: boolean;
 }
 
 export async function getBackendReadiness(): Promise<BackendReadiness> {
@@ -17,7 +19,9 @@ export async function getBackendReadiness(): Promise<BackendReadiness> {
   if (
     (value.status !== 'ready' && value.status !== 'degraded') ||
     typeof value.legacy_ready !== 'boolean' ||
-    typeof value.chat_ready !== 'boolean'
+    typeof value.chat_ready !== 'boolean' ||
+    (value.chat_mode !== 'demo' && value.chat_mode !== 'openai_compatible') ||
+    typeof value.model_generation_enabled !== 'boolean'
   ) {
     throw new Error('Readiness response is malformed');
   }

@@ -9,9 +9,15 @@ export const CHAT_EVENT_NAMES = [
 ] as const;
 
 export type ChatEventName = (typeof CHAT_EVENT_NAMES)[number];
+export type ChatMode = 'demo' | 'openai_compatible';
 export type EvidenceTier = 'A' | 'B' | 'C' | 'Unrated';
 export type TraceStatus = 'completed' | 'skipped' | 'blocked';
-export type ChatFinishReason = 'stop' | 'emergency' | 'insufficient_evidence';
+export type ChatFinishReason =
+  | 'stop'
+  | 'emergency'
+  | 'insufficient_evidence'
+  | 'greeting'
+  | 'out_of_scope';
 export type ChatErrorCode =
   | 'RETRIEVAL_UNAVAILABLE'
   | 'LLM_UPSTREAM_UNAVAILABLE'
@@ -56,7 +62,7 @@ export type SafetyEventData =
       code: 'EMERGENCY_DETECTED';
       categories: string[];
     }
-  | { level: 'info'; code: 'INSUFFICIENT_EVIDENCE' }
+  | { level: 'info'; code: 'INSUFFICIENT_EVIDENCE' | 'OUT_OF_SCOPE' }
   | {
       level: 'warning';
       code:
@@ -66,7 +72,12 @@ export type SafetyEventData =
     };
 
 export interface ChatEventDataMap {
-  meta: { stream_version: string; trace_level: 'summary' | 'diagnostic' };
+  meta: {
+    stream_version: string;
+    trace_level: 'summary' | 'diagnostic';
+    chat_mode?: ChatMode;
+    model_generation_enabled?: boolean;
+  };
   status: Omit<TraceEntry, 'sequence'>;
   sources: { citations: Citation[] };
   token: { content: string };
@@ -75,6 +86,7 @@ export interface ChatEventDataMap {
     finish_reason: ChatFinishReason;
     citation_count: number;
     safety_adjustments?: number;
+    chat_mode?: ChatMode;
   };
   error: { code: ChatErrorCode; support_id: string };
 }
@@ -149,7 +161,12 @@ function isKnownEventData(event: ChatEventName, data: Record<string, unknown>): 
     case 'meta':
       return (
         hasString(data, 'stream_version') &&
-        (data.trace_level === 'summary' || data.trace_level === 'diagnostic')
+        (data.trace_level === 'summary' || data.trace_level === 'diagnostic') &&
+        (data.chat_mode === undefined ||
+          data.chat_mode === 'demo' ||
+          data.chat_mode === 'openai_compatible') &&
+        (data.model_generation_enabled === undefined ||
+          typeof data.model_generation_enabled === 'boolean')
       );
     case 'status':
       return (
@@ -170,7 +187,9 @@ function isKnownEventData(event: ChatEventName, data: Record<string, unknown>): 
       if (data.level === 'critical') {
         return data.code === 'EMERGENCY_DETECTED' && isStringArray(data.categories);
       }
-      if (data.level === 'info') return data.code === 'INSUFFICIENT_EVIDENCE';
+      if (data.level === 'info') {
+        return data.code === 'INSUFFICIENT_EVIDENCE' || data.code === 'OUT_OF_SCOPE';
+      }
       return (
         data.level === 'warning' &&
         (data.code === 'INVALID_CITATION_REMOVED' ||
@@ -181,10 +200,15 @@ function isKnownEventData(event: ChatEventName, data: Record<string, unknown>): 
       return (
         (data.finish_reason === 'stop' ||
           data.finish_reason === 'emergency' ||
-          data.finish_reason === 'insufficient_evidence') &&
+          data.finish_reason === 'insufficient_evidence' ||
+          data.finish_reason === 'greeting' ||
+          data.finish_reason === 'out_of_scope') &&
         isNonNegativeInteger(data.citation_count) &&
         (data.safety_adjustments === undefined ||
-          isNonNegativeInteger(data.safety_adjustments))
+          isNonNegativeInteger(data.safety_adjustments)) &&
+        (data.chat_mode === undefined ||
+          data.chat_mode === 'demo' ||
+          data.chat_mode === 'openai_compatible')
       );
     case 'error':
       return (

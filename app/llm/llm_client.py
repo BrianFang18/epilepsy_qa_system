@@ -89,11 +89,19 @@ class LLMClient:
         if json_mode:
             return "{}"
 
+        question = next(
+            (item.get("content", "") for item in reversed(messages) if item.get("role") == "user"),
+            "",
+        )
+        if any("\u3400" <= character <= "\u9fff" for character in question):
+            return (
+                "【确定性 Demo 模式】当前未调用真实大语言模型，因此不会伪造个性化医学回答。"
+                "请使用流式聊天页面查看检索证据，或配置 CHAT_LLM_MODE=openai_compatible。"
+            )
         return (
-            "[Conclusion] Based on available evidence, follow standard epilepsy management and verify with specialist review.\n"
-            "[Evidence] 1) Retrieved relevant clinical/literature passages. 2) Medication and follow-up should be individualized.\n"
-            "[Risk] If prolonged seizure, altered consciousness, or breathing issues occur, seek emergency care immediately.\n"
-            "[Next Steps] Provide seizure frequency, current medication, and EEG findings for a more precise suggestion."
+            "[Deterministic demo mode] No real language model is configured, so this service "
+            "will not fabricate a personalized medical answer. Use the streaming chat UI to "
+            "inspect retrieved evidence, or configure CHAT_LLM_MODE=openai_compatible."
         )
 
     def _rule_intent(self, text: str) -> str:

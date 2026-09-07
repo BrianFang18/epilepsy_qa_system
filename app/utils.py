@@ -128,14 +128,21 @@ def simple_tokenize(text: str) -> list[str]:
 
 
 def _fallback_chinese_tokenize(text: str) -> list[str]:
-    """jieba 不可用时的中文回退分词。"""
-    # 去掉已匹配的英文，保留纯中文部分
-    zh_only = TOKEN_PATTERN.sub("", text)
-    tokens = []
-    for chunk in zh_only:
-        for start in range(0, len(chunk) - 1, 2):
+    """Use overlapping CJK bigrams when jieba is unavailable.
+
+    Keeping adjacent overlap (rather than deleting the matched CJK spans or
+    stepping by two) gives queries and documents a deterministic shared token
+    space without claiming semantic-model behavior.
+    """
+    tokens: list[str] = []
+    for chunk in re.findall(r"[\u4e00-\u9fff]+", text or ""):
+        if len(chunk) == 1:
+            if chunk not in _STOPWORDS:
+                tokens.append(chunk)
+            continue
+        for start in range(len(chunk) - 1):
             token = chunk[start : start + 2]
-            if token.strip() not in _STOPWORDS:
+            if token not in _STOPWORDS:
                 tokens.append(token)
     return tokens
 

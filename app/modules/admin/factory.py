@@ -47,7 +47,11 @@ def build_admin_runtime(settings: Settings) -> AdminRuntime:
         evaluation_max_attempts=settings.evaluation_max_attempts,
         parser_version=settings.ingestion_parser_version,
         chunker_version=settings.ingestion_chunker_version,
-        embedder_version=settings.embed_model_name,
+        embedder_version=(
+            "deterministic-md5-tf-v2"
+            if settings.ingestion_embedding_backend == "deterministic"
+            else f"bge-m3:{settings.embed_model_name}"
+        ),
         index_version=settings.ingestion_index_version,
     )
 

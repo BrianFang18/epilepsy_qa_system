@@ -13,20 +13,16 @@ from typing import Any
 
 from sqlalchemy import Engine
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.infrastructure.database.repositories import ManagementRepository
 from app.infrastructure.database.session import create_database_runtime
 from app.infrastructure.object_storage.minio import MinioObjectStorage
-from app.retrieval.embeddings import BgeM3Embedder
+from app.retrieval.embeddings import BgeM3Embedder, DeterministicHashTfEmbedder
 from app.retrieval.indexer import IngestionIndexer
 from app.retrieval.mineru_pipeline import MinerUParser
 from app.retrieval.vector_store import build_vector_store
 
-from .runner import (
-    EvaluationHandler,
-    WorkerRunner,
-    evaluation_not_configured_handler,
-)
+from .runner import EvaluationHandler, WorkerRunner, evaluation_not_configured_handler
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +55,25 @@ def _dispose_engine(engine: Engine) -> Exception | None:
     return None
 
 
+def _build_ingestion_embedder(settings: Settings) -> object:
+    if settings.ingestion_embedding_backend == "deterministic":
+        return DeterministicHashTfEmbedder(settings)
+
+    embedder = BgeM3Embedder(settings)
+    # A missing/corrupt model is a startup error for the explicit BGE worker.
+    if not bool(getattr(embedder, "using_real_model", True)):
+        embedder.close()
+        raise RuntimeError(
+            "INGESTION_EMBEDDING_BACKEND=bge_m3 requires a loadable local BGE-M3 model"
+        )
+    # Test doubles and legacy adapters may not expose this capability. The real
+    # BGE adapter does, and disables runtime fallback before any job is claimed.
+    disable_fallback = getattr(embedder, "disable_fallback", None)
+    if callable(disable_fallback):
+        disable_fallback()
+    return embedder
+
+
 @dataclass(slots=True)
 class WorkerRuntime:
     runner: WorkerRunner
@@ -81,10 +96,10 @@ class WorkerRuntime:
 def build_worker_runtime(
     worker_id: str | None = None,
     *,
-    evaluation_handler: EvaluationHandler = evaluation_not_configured_handler,
+    evaluation_handler: EvaluationHandler | None = evaluation_not_configured_handler,
 ) -> WorkerRuntime:
-    if not callable(evaluation_handler):
-        raise TypeError("evaluation_handler must be callable")
+    if evaluation_handler is not None and not callable(evaluation_handler):
+        raise TypeError("evaluation_handler must be callable or None")
 
     settings = get_settings()
     engine: Engine | None = None
@@ -107,18 +122,18 @@ def build_worker_runtime(
 
         parser = MinerUParser()
         resources.append(parser)
-        embedder = BgeM3Embedder(settings)
+        embedder = _build_ingestion_embedder(settings)
         resources.append(embedder)
         store = build_vector_store(settings)
         resources.append(store)
         indexer = IngestionIndexer(
-            embedder=embedder,
+            embedder=embedder,  # type: ignore[arg-type]
             store=store,
             dense_dimension=settings.embed_dim,
         )
         resources.append(indexer)
 
-        identity = worker_id or (f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}")
+        identity = worker_id or f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
         runner = WorkerRunner(
             worker_id=identity,
             repository=repository,
@@ -153,7 +168,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO)
-    runtime = build_worker_runtime(args.worker_id)
+    # The bundled process is ingestion-only. It must not claim evaluation jobs
+    # until a controlled evaluator is explicitly wired by another deployment.
+    runtime = build_worker_runtime(args.worker_id, evaluation_handler=None)
     stop_event = Event()
 
     def request_stop(_signum: int, _frame: Any) -> None:

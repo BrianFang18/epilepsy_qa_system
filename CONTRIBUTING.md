@@ -120,7 +120,7 @@ npm run build
 - 错误面向客户端返回稳定 code 和 support ID；内部异常只进入受控日志。
 - 中文文档为主，命令优先适配 Linux/WSL。
 - 新命令必须说明 cwd、依赖、是否联网、是否会写数据以及回滚方式。
-- 架构或运维行为变化时同步更新 `Readme.md`、`docs/ARCHITECTURE.md`、`docs/RUNBOOK.md`、`docs/DEMO.md`。
+- 架构或运维行为变化时同步更新 `README.md`、`docs/ARCHITECTURE.md`、`docs/RUNBOOK.md`、`docs/DEMO.md`。
 - 不添加未经复现的性能、准确率、安全率、RAGAS、临床或模型验收数字。
 
 ## 7. 数据库与跨存储变更

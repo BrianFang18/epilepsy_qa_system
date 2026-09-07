@@ -6,20 +6,67 @@ from ..config import Settings
 from ..utils import hash_token_to_index, normalize_vector, simple_tokenize, tf_sparse_vector
 
 
+class DeterministicHashTfEmbedder:
+    """Dependency-free local demo vectors; this is explicitly not BGE-M3."""
+
+    backend_version = "deterministic-md5-tf-v2"
+
+    def __init__(self, settings: Settings) -> None:
+        self.dim = settings.embed_dim
+
+    def encode_dense(self, texts: Iterable[str]) -> list[list[float]]:
+        return [self._hash_dense(text) for text in texts]
+
+    @staticmethod
+    def encode_sparse(texts: Iterable[str]) -> list[dict[int, float]]:
+        return [tf_sparse_vector(text) for text in texts]
+
+    def embed_query(self, query: str) -> tuple[list[float], dict[int, float]]:
+        return self.encode_dense([query])[0], self.encode_sparse([query])[0]
+
+    def close(self) -> None:
+        return None
+
+    def _hash_dense(self, text: str) -> list[float]:
+        vector = [0.0] * self.dim
+        tokens = simple_tokenize(text)
+        for token in tokens:
+            vector[hash_token_to_index(token, self.dim)] += 1.0
+        return normalize_vector(vector)
+
+
 class BgeM3Embedder:
-    """
-    BGE-M3 向量化抽象层：
-    - 优先使用 FlagEmbedding 的 BGEM3 模型输出 dense + sparse。
-    - 不可用时回退到确定性的哈希 dense + TF sparse。
+    """BGE-M3 adapter with an opt-out legacy deterministic fallback.
+
+    Legacy API paths retain the fallback for compatibility. Managed BGE ingestion
+    disables it after startup validation so a runtime model failure cannot be
+    labelled and indexed as BGE output.
     """
 
-    def __init__(self, settings: Settings, model_name: str = "BAAI/bge-m3") -> None:
+    def __init__(self, settings: Settings, model_name: str | None = None) -> None:
         self.settings = settings
         self.dim = settings.embed_dim
-        self.model_name = model_name
+        self.model_name = model_name or settings.embed_model_name
         self.model_path = settings.embed_model_path
+        self._fallback = DeterministicHashTfEmbedder(settings)
+        self._fallback_enabled = True
         self._model = None
         self._try_init_real_model()
+
+    @property
+    def using_real_model(self) -> bool:
+        return self._model is not None
+
+    @property
+    def backend_version(self) -> str:
+        if self.using_real_model:
+            return f"bge-m3:{self.model_name}"
+        return self._fallback.backend_version
+
+    def disable_fallback(self) -> None:
+        """Require every subsequent embedding operation to use BGE-M3."""
+
+        self._fallback_enabled = False
 
     def _try_init_real_model(self) -> None:
         if self.settings.mock_mode:
@@ -31,90 +78,84 @@ class BgeM3Embedder:
         except Exception:
             self._model = None
 
-    def encode_dense(self, texts: Iterable[str]) -> list[list[float]]:
-        """
-        长这样：[0.012, -0.034, 0.056, ..., 0.089]（1024维浮点数）每个维度都有非零值
-        - 语义理解：能理解"狗"和"犬"意思相近。
-        优点是能够捕捉更细粒度的语义信息，但需要更多的参数和计算资,且丢失精确关键词信息
-        """
-        texts = list(texts)
-        if not texts:
-            return []
+    def _handle_runtime_failure(self, operation: str, exc: Exception) -> None:
+        self._model = None
+        if not self._fallback_enabled:
+            raise RuntimeError(
+                f"BGE-M3 {operation} failed; deterministic fallback is disabled"
+            ) from exc
 
+    def encode_dense(self, texts: Iterable[str]) -> list[list[float]]:
+        values = list(texts)
+        if not values:
+            return []
         if self._model is not None:
             try:
-                out = self._model.encode(
-                    texts,
+                output = self._model.encode(
+                    values,
                     batch_size=8,
                     max_length=1024,
                     return_dense=True,
                     return_sparse=False,
                     return_colbert_vecs=False,
                 )
-                dense = out.get("dense_vecs", [])
+                dense = output.get("dense_vecs", [])
                 if hasattr(dense, "tolist"):
                     dense = dense.tolist()
-                return [normalize_vector([float(x) for x in vec]) for vec in dense]
-            except Exception:
-                pass
-        # # 回退方案：哈希向量，使用哈希函数将文本转换为固定长度的向量
-        return [self._hash_dense(text) for text in texts]
+                converted = [normalize_vector([float(item) for item in vector]) for vector in dense]
+            except Exception as exc:
+                self._handle_runtime_failure("dense embedding", exc)
+            else:
+                if len(converted) == len(values):
+                    return converted
+                self._handle_runtime_failure(
+                    "dense embedding",
+                    ValueError("BGE-M3 dense output count mismatch"),
+                )
+        if not self._fallback_enabled:
+            raise RuntimeError("BGE-M3 dense embedding is unavailable")
+        return self._fallback.encode_dense(values)
 
     def encode_sparse(self, texts: Iterable[str]) -> list[dict[int, float]]:
-        """
-        其中大部分维度的值为零，仅少数维度有非零值
-        长这样：{1234: 0.8, 5678: 0.5, 9012: 0.3}（字典格式）
-        精确关键词匹配：统计词频权重
-        但不理解语义, 优点是计算速度快，计算成本低，存储需求小,但召回率较低,可能无法捕捉到所有语义信息
-        """
-        texts = list(texts)
-        if not texts:
+        values = list(texts)
+        if not values:
             return []
-
         if self._model is not None:
             try:
-                out = self._model.encode(
-                    texts,
+                output = self._model.encode(
+                    values,
                     batch_size=8,
                     max_length=1024,
                     return_dense=False,
                     return_sparse=True,
                     return_colbert_vecs=False,
                 )
-                sparse = out.get("lexical_weights") or out.get("sparse_vecs") or []
+                sparse = output.get("lexical_weights") or output.get("sparse_vecs") or []
                 converted: list[dict[int, float]] = []
                 for item in sparse:
-                    if isinstance(item, dict):
-                        converted.append({int(k): float(v) for k, v in item.items()})
-                    else:
-                        converted.append({})
-                if len(converted) == len(texts):
+                    converted.append(
+                        {int(key): float(value) for key, value in item.items()}
+                        if isinstance(item, dict)
+                        else {}
+                    )
+            except Exception as exc:
+                self._handle_runtime_failure("sparse embedding", exc)
+            else:
+                if len(converted) == len(values):
                     return converted
-            except Exception:
-                pass
-
-        return [tf_sparse_vector(text) for text in texts]
+                self._handle_runtime_failure(
+                    "sparse embedding",
+                    ValueError("BGE-M3 sparse output count mismatch"),
+                )
+        if not self._fallback_enabled:
+            raise RuntimeError("BGE-M3 sparse embedding is unavailable")
+        return self._fallback.encode_sparse(values)
 
     def embed_query(self, query: str) -> tuple[list[float], dict[int, float]]:
-        dense = self.encode_dense([query])[0]
-        sparse = self.encode_sparse([query])[0]
-        return dense, sparse
+        return self.encode_dense([query])[0], self.encode_sparse([query])[0]
 
     def close(self) -> None:
         close = getattr(self._model, "close", None)
         if callable(close):
             close()
         self._model = None
-
-    def _hash_dense(self, text: str) -> list[float]:
-        """
-        哈希向量：使用哈希函数将文本转换为固定长度的向量
-        """
-        vec = [0.0] * self.dim
-        tokens = simple_tokenize(text)
-        if not tokens:
-            return vec
-        for token in tokens:
-            idx = hash_token_to_index(token, self.dim)
-            vec[idx] += 1.0
-        return normalize_vector(vec)
