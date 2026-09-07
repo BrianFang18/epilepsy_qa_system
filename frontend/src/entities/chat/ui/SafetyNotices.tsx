@@ -17,6 +17,12 @@ function copyFor(event: SafetyEventData) {
         message: '当前证据不足',
         description: '系统没有找到足以支持可靠回答的本地证据，因此不会猜测作答。',
       };
+    case 'OUT_OF_SCOPE':
+      return {
+        type: 'info' as const,
+        message: '问题超出系统范围',
+        description: '该问题没有进入癫痫知识库检索，也没有调用模型。',
+      };
     case 'INVALID_CITATION_REMOVED':
       return {
         type: 'warning' as const,

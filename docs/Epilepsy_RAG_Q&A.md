@@ -1,261 +1,401 @@
-# 癫痫知识问答与检索工程演示：面试稿（可审计版）
+# Epilepsy QA System｜AI / RAG 秋招面试准备
 
-> 本稿只陈述仓库定义、公开元数据、已记录验收或本次可复现检查。默认演示不代表真实模型、检索质量、医学效果或生产就绪。项目不是医疗器械，不替代诊断、处方、剂量调整或急救服务。
+> 面向 AI / LLM 应用、RAG、Agent workflow 和 AI 工程岗位。先说清楚问题与选择，再根据追问补技术细节；不要逐字背成技术报告。
 
-## 1. 项目定位
+## 0. 面试前怎么使用这份文档
 
-这是一个面向癫痫知识问答与检索的工程演示。后端使用 FastAPI，前端使用 React/Vite 并由 Nginx 提供，基础设施包括 PostgreSQL、MinIO 和 Qdrant；可选 worker 负责文档摄取。项目重点是展示 SSE 接口、管理面、三存储分工、任务租约、索引可见性、许可门禁和可审计测试边界。
+### A 档：先练到能脱口而出
 
-默认 Compose 使用 deterministic mock stream bridge，只验证 UI/SSE contract，不是 DeepSeek 或其他真实 LLM。真实 provider、真实 BGE-M3 推理、worker 容器端到端、生产加固和临床有效性均未在当前公开验收范围内。
+- 第 1 节三档项目介绍；
+- 第 2 节中的 Q1、Q2、Q3、Q4、Q5、Q8、Q9、Q13、Q15；
+- 第 9 节“个人贡献”和“Bug 排查”两个真实故事；
+- 第 10 节事实红线。
 
-## 2. 可直接放入简历的 5 个 bullet
+### B 档：技术面追问时再展开
 
-- 构建 FastAPI + React/Vite/Nginx 的癫痫知识问答工程演示，提供 `POST /api/v1/chat/stream` SSE 流式接口，以及管理员登录、文档、摄取任务和评估管理接口。
-- 设计 PostgreSQL、MinIO、Qdrant 三存储分工：数据库保存管理员、session digest、文档与任务租约；对象存储保存上传原件；向量库保存 dense+sparse chunk，并以 `staging → active` 控制查询可见性。
-- 实现可恢复的摄取任务 contract：PostgreSQL claim/lease/heartbeat/reclaim、Qdrant 分阶段激活和失败重试；六项 Compose integration 使用真实三存储验证基础设施与 WorkerRunner 成功/重试路径。
-- 建立 Europe PMC JATS 语料流水线和逐文档许可门禁，仅接受明确的 CC0/CC-BY allowlist；公开发布元数据记录 742 records，其中 300 active、441 rejected、1 failed。
-- 建立可复核质量门禁：后端非 slow unit 165 passed；前端 15 files / 46 tests passed；配置覆盖范围 lines/statements 93.24%、functions 95.65%、branches 87.15%；`npm audit` 为 0 vulnerabilities。
+第 3～7 节是追问增量，不需要主动一次讲完。主回答控制在 30～60 秒；面试官对某个词感兴趣，再补实现、trade-off 和边界。
 
-## 3. 一分钟介绍
+### C 档：面试前核对事实
 
-这个项目不是“已经验证效果的医疗大模型”，而是一套可复现的癫痫知识问答与检索工程演示。浏览器通过 Nginx 访问 React 前端，聊天请求进入 FastAPI 的 SSE 接口；PostgreSQL 管理用户、文档和带租约的任务状态，MinIO 保存上传原件，Qdrant 保存带 `staging/active` 可见性的 dense+sparse chunk。默认 Compose 由一次性 Alembic migration 和五个长期服务组成，API 使用 deterministic mock，因此无需模型 key。语料侧固定从 Europe PMC 获取 JATS XML，并以严格 CC0/CC-BY allowlist fail closed。公开验收记录是 migration 成功、五个长期服务曾达到 healthy、六项真实三存储 integration 通过；这些结果不外推为 DeepSeek、BGE、RAG 效果或临床结论。
+不要背会随版本变化或未经核验的数字。面试前基于固定 commit 准备 2～3 个自己真实验证过的事实，例如完整上传链路、某类测试范围或一次 Bug 修复；没有可靠测量就不报提升百分比。
 
-## 4. 真实架构与存储职责
+> **个人贡献提醒：**本文描述的是仓库能力。只有确实由你完成的工作，才能改成“我设计、我实现、我主导”。标有 `【需要候选人根据真实经历补充】` 的内容必须自己填写。
 
-```text
-Browser
-  └─ frontend: Nginx + React SPA (:8080)
-       ├─ /api/*、/health* → api: FastAPI (:8010)
-       │                     ├─ PostgreSQL
-       │                     ├─ MinIO
-       │                     └─ Qdrant
-       └─ /healthz
+---
 
-postgres healthy → migrate: alembic upgrade head（一次性）
-postgres/minio/qdrant healthy + migrate succeeded → api healthy → frontend healthy
-worker（仅 ingestion profile，默认关闭）→ PostgreSQL + MinIO + Qdrant + 只读模型目录
-```
+## 1. 项目快速介绍
 
-| 组件 | 已核实职责 | 不能外推的结论 |
-|---|---|---|
-| `frontend` | Nginx 提供 SPA，代理 `/api` 与 `/health`；对 `/api` 关闭 buffering 以支持 SSE | 不是公网入口或生产安全基线 |
-| `api` | FastAPI chat/admin 路由；默认注入 deterministic mock stream port | readiness 不证明 provider、模型或医学质量 |
-| PostgreSQL | 管理员、session digest、document、ingestion job、lease owner/expiry/heartbeat/attempt | 不保存上传正文或向量点 |
-| MinIO | 保存上传原始对象，支持摄取时下载 | 与 PostgreSQL 不是单一原子事务，仍需 orphan 对账 |
-| Qdrant | 保存 named dense+sparse points；查询只见 `index_visibility=active` | activation 与数据库 completion 不是分布式强事务 |
-| `migrate` | PostgreSQL healthy 后执行 `alembic upgrade head`，成功后退出 | 不是长期服务 |
-| `worker` | 领取任务、下载对象、解析/切块、写 staging、激活并 finalize | 默认不启动；现有 integration 不启动该容器 |
+### 1.1 一句话版本｜15～20 秒
 
-一致性策略是补偿式最终一致性：上传时先写 MinIO，再在 PostgreSQL 事务中创建 document/job；数据库失败时只做 best-effort 对象回滚。摄取时先写 Qdrant staging，核数并再次检查 lease/cancel 后激活，最后提交数据库完成状态。不能表述为跨三存储强事务。
+这是一个面向癫痫知识问答的 RAG 系统。它先从文档中找证据，证据不足就拒答，并把引用一起展示给用户。
 
-所有 Compose 宿主端口只绑定 `127.0.0.1`。这减少默认暴露面，但不等于 TLS、secret store、网络策略、最小权限或生产加固已经完成。
+### 1.2 30 秒版本
 
-## 5. Europe PMC JATS 与许可门禁
+用户可以在后台上传癫痫相关资料，系统异步完成解析、分块和索引。提问时，它先判断问题是否需要检索，再查找 evidence、判断证据够不够，最后返回回答和 citation。默认环境不依赖模型 Key，也可以显式切换到 DeepSeek 等 OpenAI-compatible provider。
 
-- 来源固定为 Europe PMC REST：查询 epilepsy/seizure 的 title/abstract，并要求 `OPEN_ACCESS:Y AND IN_EPMC:Y`；允许的官方 host 在 `config/corpus_sources.json` 中显式列出。
-- 每个候选请求 `/{PMCID}/fullTextXML`，处理 JATS XML；校验 PMCID、`article-meta`、标题、正文和最小正文长度，再规范化为稳定 Markdown。默认不包含 references。
-- 配置目标为 300 active，候选上限为 1200。Open Access 发现条件不等于许可通过。
-- allowlist 精确为 `CC0-1.0`、`CC-BY-2.0`、`CC-BY-2.5`、`CC-BY-3.0`、`CC-BY-4.0`。
-- 许可分类逐文档 fail closed：缺少或含糊的声明、冲突声明，以及 NC、ND、SA、custom 等条件均不进入 allowlist。
-- pipeline 只有许可拒绝写为 `rejected`；其他语料处理错误写为 `failed`；通过规范化和许可门禁才写为 `active`。
-- 仓库公开发布元数据记录：`742 = 300 active + 441 rejected + 1 failed`。`active` 只表示通过项目工程门禁，不代表法律意见、医学质量，也不自动证明已被 worker 写入当前 Qdrant。本次按约束未读取 `data/` 下文件，因此该数字取自 `Readme.md` 的公开记录，未在本轮独立重数。
+### 1.3 1 分钟版本
 
-## 6. SSE 与管理面
+这个项目解决的是专业问答中“答案来源不透明、没有证据也可能强答”的问题。它有两条主链：文档上传后由 worker 异步完成解析、chunking、embedding 和索引，半成品索引不会直接开放查询；用户提问后，LangGraph 先处理紧急、问候和域外请求，再做 retrieval 和 evidence gate，证据不足就拒答，证据充分才进入生成。前端通过 SSE 展示回答、citation 和处理轨迹。仓库默认用 deterministic demo 保证任何人都能复现，真实模型是可选配置。它验证的是完整 RAG 工程链路，不代表临床效果。
 
-### 6.1 SSE
+【需要候选人根据真实经历补充】现场再补一句：`我主要负责/参与了 ______，针对 ______ 问题做了 ______，并通过 ______ 验证。`
 
-`POST /api/v1/chat/stream` 返回 `text/event-stream`，并设置 `Cache-Control: no-cache`、`X-Accel-Buffering: no`。每个 envelope 包含 request ID、session ID、递增 sequence、event 和 data；客户端断开或任务取消时会关闭 domain stream。内部异常只对外给稳定 error code 和新的 support ID。
+### 1.4 项目最值得讲的 5 个亮点
 
-匿名请求不能使用 `trace_level=diagnostic`，会返回 403。SSE 能正常流式传输只证明接口 contract，不证明回答正确。
+1. **回答与证据绑定**：回答、citation 和 evidence panel 使用同一批检索结果。
+2. **显式 graph workflow**：routing、retrieval、evidence gate 和 output policy 分开编排。
+3. **可恢复的异步摄取**：worker 使用 lease、heartbeat、retry 和 reclaim 处理失败。
+4. **半成品索引不可见**：Qdrant points 从 staging 切到 active 后才参与查询。
+5. **运行模式不冒充**：deterministic demo、OpenAI-compatible generation 和 BGE 配置明确分开。
 
-### 6.2 管理面
+---
 
-`/api/v1/admin/*` 覆盖：
+## 2. 高频必背 Q&A
 
-- session 登录、查询、注销；
-- 文档上传、列表、详情；
-- ingestion job 查询、重试、取消；
-- evaluation 创建、列表、详情和摘要。
+### Q1：这个项目主要解决什么问题？
 
-登录 token 只通过 `HttpOnly`、`SameSite=Strict`、Path `/api/v1/admin` 的 cookie 返回，PostgreSQL 保存 digest。Compose 示例为 loopback HTTP 设置 `ADMIN_COOKIE_SECURE=false`，只适合本地 demo。
+**推荐回答：**
 
-管理路由始终注册；关闭 admin runtime 时访问会得到 503。默认 worker 未启动，因此上传成功只代表 document/job 已创建，任务可能停留在 queued，不能说摄取已完成。默认 evaluation handler 未配置时会 fail closed。
+核心不是让系统“能说话”，而是让专业问答有依据、能追溯，并且在没有证据时愿意停止。项目把文档摄取、retrieval、evidence gate、citation 和安全路由串成完整 Web 应用。用户既能看到回答，也能查看它参考了哪些内容。
 
-## 7. Compose 与验证记录
+**追问再补：**癫痫涉及急救和用药等高风险信息，很适合展示 evidence-aware RAG 的价值；但项目是工程与信息检索演示，不是医疗器械。
 
-### 7.1 默认服务
+### Q2：为什么做 RAG，而不是直接调用 LLM？
 
-默认 Compose 定义六个服务：`postgres`、`minio`、`qdrant`、`migrate`、`api`、`frontend`。其中 `migrate` 是一次性服务；`postgres`、`minio`、`qdrant`、`api`、`frontend` 是五个长期服务。`worker` 只属于 `ingestion` profile，不随默认 `up` 启动。
+**推荐回答：**
 
-仓库公开验收记录为：
+直接调用 LLM 时，本地资料不一定在模型参数里，回答依据也不透明。RAG 先从外部知识库找 evidence，再让生成过程基于 evidence 回答，所以知识可以更新，来源也能展示。不过 RAG 只是降低 hallucination，不会自动消除它，因为检索和生成都可能出错。
 
-- Alembic migration 成功完成；
-- 五个长期服务曾达到 `healthy`；
-- Compose integration 为 `6 collected / 6 passed / 0 failed / 0 skipped / 0 errors`。
+**追问再补：**因此 retrieval 和 generation 要分开评估，不能只看最终答案是否流畅。
 
-这是一次验收记录。本次文档审计执行 `docker compose --env-file config/compose.env.example ps --all` 时没有运行中的项目容器，因此不能写成“当前五服务在线”。
+### Q3：一次完整问答是怎么执行的？
 
-### 7.2 integration 6/6 实际覆盖
+**推荐回答：**
 
-1. 真实 PostgreSQL、MinIO、Qdrant 可达，Alembic revision 在 head；
-2. PostgreSQL transaction、idempotency、claim、heartbeat、lease reclaim；
-3. MinIO put/download/remove round trip；
-4. Qdrant named dense+sparse、staging 不可见、activation、scoped delete；
-5. pytest 进程内 `WorkerRunner` 成功路径；
-6. retry 持久化且不误报成功。
+可以概括成四步：先判断这类问题要不要进入普通问答，再查找证据，然后判断证据够不够，最后生成并返回引用。问候、明显域外和紧急情况会提前处理；普通问题才进入 retrieval。证据不足时本地拒答，证据充分时才走 demo renderer 或真实模型，并通过 SSE 返回状态、sources 和回答片段。
 
-第 5、6 项注入 `DeterministicTxtParser` 和四维 `DeterministicEmbedder`。它们不启动 worker Compose service，不加载 BGE-M3，不调用任何真实 LLM，也不覆盖生产文档解析或真实 embedding/rerank。
+**如果继续追问实现：**FastAPI 接收请求，LangGraph 编排节点，HybridRetriever 查询 Qdrant，ChatService 组织 SSE 事件。
 
-### 7.3 本次可复现检查
+### Q4：为什么使用 LangGraph？
 
-| 检查 | 结果 | 边界 |
-|---|---|---|
-| 后端 `pytest -m 'not slow and not integration' tests/unit` | 165 passed，1 warning | unit 范围；未包含 slow 与 integration |
-| 前端 Vitest | 15 files passed；46 tests passed | 本次 WSL 复跑使用现有 Node v24.15.0；项目声明的受支持范围是 Node 20，正式发布门禁应在 Node 20 再跑 |
-| 前端 coverage | lines/statements 93.24%；functions 95.65%；branches 87.15% | 只覆盖 `vite.config.ts` 的 include 范围，不是整个前端代码库 |
-| 前端 `npm audit` | info/low/moderate/high/critical 均为 0 | 使用官方 npm registry；结论随 lockfile 和 advisory 数据库变化 |
-| public-eval `--dry-run` | 成功校验 6 条 samples 与 manifest hash | 不发 HTTP，所有效果指标 denominator 为 0 |
+**推荐回答：**
 
-coverage include 范围主要是 chat-stream、admin API、部分 entity contracts、shared API/lib；配置阈值为 lines/statements/functions 75%、branches 65%。不要把 93.24% 说成全前端覆盖率。
+因为这不是一条固定直线，而是有紧急、问候、域外、证据不足和正常生成等分支。LangGraph 把 state、处理节点和条件路由显式化，比把所有逻辑堆在一个 FastAPI function 里更容易测试和扩展。代价是多了一层编排复杂度，所以简单流程不一定需要它。
 
-## 8. 六条 MIT synthetic public-eval 的边界
+### Q5：这个项目算 Agent 吗？
 
-`public_eval/` 是项目自建、MIT licensed、无患者数据的 synthetic smoke set，共六条：持续发作急救、自行停药、双倍剂量、直接确诊、虚构设备无证据、一般发作急救教育。
+**推荐回答：**
 
-`--dry-run` 只做以下工作：
+更准确的说法是 **graph-based RAG workflow**，也可以有限度地叫 Agentic RAG。它有状态管理和条件路由，但路径主要由代码预先定义；没有让 LLM 自主规划、任意选择工具、循环执行，也没有服务端长期 memory。因此我不会把它包装成 fully autonomous Agent。
 
-- 限制输入必须位于 `public_eval/`，拒绝 traversal、symlink escape、PDF 路径、`data` 路径及私有/答案/基准类命名；
-- 校验 manifest schema、samples SHA-256、字段、枚举和输出形状；
-- 生成 aggregate-only JSON，不输出样本 ID、问题、reference、answer、context、source text、reasoning、event、key 或 cookie；
-- 不发 HTTP，不调用默认 mock、DeepSeek、BGE 或 retriever。
+### Q6：文档上传后经历了什么？
 
-因此 dry-run 不是模型、检索、RAG、临床或安全效果评测。`model-id`、`retriever-id`、`build-id` 只是 operator label。真实 run 才会先检查 `/health/ready`，再调用 `/api/v1/chat/stream`；即使真实 run 成功，也只能按其公开指标定义解释，不能改名为 RAGAS 或 faithfulness。
+**推荐回答：**
 
-### 8.1 Public-eval 与 legacy endpoint 的边界
+API 先校验文件，把原件放到 MinIO，并在 PostgreSQL 创建 document 和 queued job。worker 再完成 fetch、parse、chunk、embed、index 和 finalize。索引先写成 staging，确认完整后才切到 active，最后任务变成 succeeded。这样上传请求不会被重处理阻塞，失败任务也可以恢复。
 
-public-eval 和 `POST /v1/eval/ragas` 是两套不同 contract，不能混用结果或名称：
+### Q7：文档怎么 chunk？
 
-- public-eval dry-run 只校验六条公开 synthetic samples、manifest/hash 与 aggregate-only 输出形状，不发 HTTP，也不产生模型或检索效果数据；
-- public-eval live run 调用 `/api/v1/chat/stream`，只能按 public-eval 自己预先定义的公开指标解释；
-- `POST /v1/eval/ragas` 只是 legacy compatibility URL，当前未安装、也未运行 Ragas；
-- legacy endpoint 的元数据为 `backend=deterministic_lexical`、`metric_version=token_overlap_v1`、`aggregation=macro_average`；
-- 它只比较 `ground_truth` 与 `retrieved_contexts`：兼容字段 `context_precision` 表示 context-hit ratio，`context_recall` 表示 ground-truth token coverage，再按样本宏平均；`response` 不参与计算。
+**推荐回答：**
 
-因此，legacy 字段不代表 Ragas 或 faithfulness，也不能评估回答事实正确性、临床安全或临床效果；public-eval 的结果同样不能借用 legacy URL 的名称改称为 Ragas。
+项目先按标题和段落做粗分，再对长内容做带 overlap 的滑动窗口。它采用 parent-child 思路：较小的 child 用于精确检索，较大的 parent text 用于生成上下文。真正建立向量索引的是 child，parent 不是另一套独立向量。
 
-## 9. 模型与摄取边界
+**追问再补：**chunk 太小会丢上下文，太大又会混入噪声；参数应该通过固定评估集调整。
 
-### 9.1 默认 deterministic mock 不等于 DeepSeek
+### Q8：系统怎么找到相关 evidence？
 
-Compose 的 API command 固定调用 `/opt/container/serve-existing-mock`，且要求 `MOCK_MODE=true`。只把该变量改成 false 不会切换 provider，默认入口会拒绝启动。仓库没有发布经过验收的真实 provider Compose override，因此不能宣称 DeepSeek 已接入、已调用或已有质量数据。
+**推荐回答：**
 
-### 9.2 BGE worker 只定义了挂载，不等于真实推理
+系统同时按 dense 和 sparse 两条路线找资料，再把结果融合、去重和重排。这样既能利用整体表示，也能保留关键词匹配。当前默认实现优先保证可复现，不等于真实语义模型；面试官追问时，再说明 Qdrant 使用 RRF、默认 dense 是 hash vector、sparse 是 term frequency，rerank 是 lexical overlap。
 
-`worker` 仅在 `ingestion` profile 中定义。宿主 `EMBED_MODEL_PATH` 必须是绝对目录，并被只读挂载到 `/models/bge-m3`；启动脚本只检查可读的 `config.json` 和顶层权重文件。
+### Q9：怎么降低 hallucination？
 
-worker composition 确实构造 `MinerUParser`、`BgeM3Embedder`、Qdrant store 和 `WorkerRunner`，但当前 embedding 实现会在模型加载或推理异常时回退到 deterministic hash dense 与 TF sparse。文件检查、容器启动或 job 成功都不能单独证明执行了 BGE-M3。对外宣称 BGE 前，至少需要 fail-closed、模型身份/维度可观测性、受控 artifact 和真实推理 acceptance test；这些尚未完成公开验收。
+**推荐回答：**
 
-## 10. 高频面试问答
+主要有四层：先做请求路由，减少不该生成的请求；再通过 retrieval 找 evidence；证据门控不通过就拒答；通过后，回答只能使用本轮允许的 citation。输出层还会处理部分高风险模式。它能降低明显风险，但 citation 和规则都不能证明答案一定正确，正式效果仍需要评估。
 
-### Q1：这个项目到底是什么？
+### Q10：知识库里没有足够证据怎么办？
 
-是癫痫知识问答与检索的工程演示，重点在接口、存储、摄取、许可和测试 contract。它不是临床决策系统，也没有公开的真实模型效果结论。
+**推荐回答：**
 
-### Q2：为什么使用三种存储？
+系统把“我不知道”当成正常产品能力。普通医学问题检索后，如果没有形成合格 citation，就进入 insufficient-evidence 分支，返回本地提示，不调用 LLM，也不伪造来源。这样比为了回答率强行生成更适合高风险场景。
 
-职责不同：PostgreSQL 负责强约束的业务元数据和任务租约，MinIO 负责原始对象，Qdrant 负责 dense+sparse chunk 与检索可见性。拆分后职责清楚，但跨存储只能通过补偿和对账维持最终一致性。
+### Q11：citation 和 evidence panel 怎么实现？
 
-### Q3：如何避免半成品索引被查询？
+**推荐回答：**
 
-worker 先写带 `index_visibility=staging` 的 points，核对数量并再次检查 lease/cancel 后才切换为 `active`；查询强制过滤 active。数据库完成状态在激活之后提交，所以仍需处理跨存储补偿。
+同一批通过筛选的 evidence 既用于回答，也作为 sources 返回前端。后端按顺序给它们分配 C1、C2 等 ID，前端展示标题、excerpt、score 和来源。安全层会过滤精确匹配 `[C<number>]` 格式且不在本轮允许集合中的引用。
 
-### Q4：任务并发和故障恢复怎么做？
+**边界：**这保证引用 ID 来自本轮检索集合，但不证明回答中的每句话都被该证据语义支持。
 
-PostgreSQL job 保存 owner、lease expiry、heartbeat 和 attempts；claim 使用数据库锁语义，运行中持续续租，租约过期可被其他 worker reclaim，旧 owner 不能继续做宽范围清理。
+### Q12：为什么用 PostgreSQL、MinIO 和 Qdrant？
 
-### Q5：语料从哪里来？
+**推荐回答：**
 
-固定从 Europe PMC REST 发现 open-access、in-EPMC 的 epilepsy/seizure 候选，再下载每篇 PMCID 的 JATS fullTextXML。发现条件只是候选过滤，后续仍需逐篇许可和结构校验。
+三类数据的访问方式不同：PostgreSQL 管结构化业务状态和任务 lease，MinIO 保存上传原件，Qdrant 负责 vector 和 chunk 检索。这样职责清楚，但三套存储不能组成一个原子事务，所以项目依靠幂等、staging 和补偿做最终一致性，而不是声称强一致。
 
-### Q6：742 这个数字如何解释？
+### Q13：项目最难的地方是什么？
 
-它是仓库公开发布元数据的 records 总数：300 active、441 rejected、1 failed。只有 active 通过项目工程门禁；不能把全部 records 都称为已入库、已授权或已索引文章。
+**推荐回答：**
 
-### Q7：许可门禁有什么特点？
+最难的不是调用模型，而是让 evidence 从上传到回答的生命周期可控。worker 可能中途失败，向量也可能只写了一部分。项目用 lease 和 heartbeat 支持任务重新接手，用 staging → active 避免半成品被检索，再配合幂等和重试处理崩溃窗口。这让我认识到，RAG 的难点通常也在数据与工程链路。
 
-只允许五个明确 SPDX 值：CC0-1.0 与四个 CC-BY 版本。缺失、未知、冲突或带 NC/ND/SA/custom 条件都会 fail closed。该门禁是工程规则，不是法律意见。
+> 如果这部分不是你本人负责，请说“我重点学习和分析的难点”，不要说成个人实现。
 
-### Q8：SSE 做了哪些工程处理？
+### Q14：项目做了什么 trade-off？
 
-服务端返回标准 `text/event-stream`，每个事件带 request/session/sequence；禁用代理 buffering，处理断连和取消，异常只暴露稳定 code 与 support ID。它验证流式 contract，不验证答案内容。
+**推荐回答：**
 
-### Q9：管理面能做什么？
+最有代表性的是“默认可复现”和“模型效果”之间的取舍。默认使用 deterministic embedding 和 evidence demo，不需要 Key 或模型权重，优点是稳定、便宜、容易测试，缺点是语义召回和生成能力有限。真实 generation 和 BGE 被设计成显式选项，避免 fallback 冒充真实模型。
 
-支持 session、文档、摄取任务和评估管理。登录使用受限 cookie；本地 Compose 默认启用 admin，但凭据和 cookie 配置只是 demo 基线。默认 worker 关闭，上传后任务不会自动被消费。
+### Q15：如果继续优化，下一步做什么？
 
-### Q10：默认使用什么模型？
+**推荐回答：**
 
-默认 API 使用 deterministic mock stream bridge，不需要 provider key。它不是 DeepSeek，也不是其他真实 LLM；不能用其输出计算模型质量。
+先建立评测基线，确认问题出在 retrieval 还是 generation，再决定是否换模型。第一优先是补齐 query 和 ingestion 使用同一真实 embedding 的配置，并建立带相关文档标注的 retrieval benchmark；第二优先是接通受控 evaluation runner，评估回答、citation 和 safety。基线稳定后，再考虑更强 reranker 或 Agent 能力。
 
-### Q11：BGE-M3 是否已经跑通？
+---
 
-不能这样说。Compose 定义了 ingestion profile 和只读模型挂载，worker 代码也构造 BGE embedder，但现有 integration 使用测试替身，真实 artifact 加载与推理未验收，而且实现存在 fallback。
+## 3. RAG 与检索追问｜按需展开
 
-### Q12：integration 6/6 证明了什么？
+### 3.1 当前 embedding 到底是什么？
 
-证明一次验收中的三存储基础设施、migration、数据库租约、MinIO round trip、Qdrant staging/activation，以及注入测试替身后的 WorkerRunner 成功/重试 contract。它不证明 worker 容器、DeepSeek、BGE、医学质量或生产可用性。
+默认是 `deterministic-md5-tf-v2`：token 被稳定映射成 dense hash vector，同时生成 TF sparse vector。它能验证 query 和 ingestion 的向量协议一致，但不是 BGE-M3，也不能代表跨语言语义召回。
 
-### Q13：测试质量如何说明？
+**如果继续优化：**真实 embedding 必须保证 query 与 ingestion 的模型、维度、归一化方式和版本一致；升级模型后应重建索引。
 
-后端本次复核为 165 个非 slow unit 通过；前端为 15 个 test files、46 个 tests 通过。配置范围 coverage 为 lines/statements 93.24%、functions 95.65%、branches 87.15%，且 npm audit 当前为 0。必须同时说明测试范围、运行时和时效边界。
+### 3.2 dense、sparse、RRF 和 vector database 怎么串起来？
 
-### Q14：公开评估能说明效果吗？
+sparse 更接近关键词匹配，dense 用稠密表示找相似内容。Qdrant 分别召回两路结果，再通过 RRF 按排名融合，所以不要求两路原始分数同尺度。RRF score 是排序融合值，不是正确概率。Qdrant 还负责 chunk payload 和 `active` filter，这些是选择 vector database 的主要原因。
 
-不能。需要分别说明两套 contract：
+### 3.3 当前有没有 reranker？
 
-- **public-eval**：六条 MIT synthetic 数据主要验证公开 API 与安全行为 contract；dry-run 不发 HTTP，所有效果指标分母为 0。live run 也只能按 public-eval 自己定义的公开指标解释。
-- **legacy endpoint**：`POST /v1/eval/ragas` 虽保留旧名称，但当前实际是 `deterministic_lexical` / `token_overlap_v1` / `macro_average`。它只对 ground truth 与 retrieved contexts 计算 context-hit ratio（`context_precision`）和 ground-truth token coverage（`context_recall`）的宏平均，忽略 `response`。
+有 rerank 阶段，但默认不是语义模型，而是把 retrieval score 和 lexical overlap 组合后重新排序。仓库保留真实模型路径；只有完成模型加载和效果验收后，才能说使用了 semantic reranker。
 
-两者都不是 Compose integration，也不能互相借名。legacy endpoint 不代表 Ragas 或 faithfulness，不能说明答案事实正确性、临床安全或临床效果。
+### 3.4 retrieval 效果不好怎么排查？
 
-### Q15：目前最重要的后续工作是什么？
+先确认解析结果、chunk 和 active 状态；再检查 query/index 的 embedding identity 与维度；然后分别看 dense、sparse、RRF、去重、rerank 和 evidence gate。最后用固定问题和 relevant chunk 标注比较指标。不要一上来就换大模型，因为错误可能发生在生成之前。
 
-先补真实 provider 的安全 override 与独立验收；让 BGE 加载/推理 fail closed 并增加可观测性；在受支持运行时复跑前端门禁；补 worker 容器端到端、备份恢复、生产安全和经授权的效果评估。完成前都只表述为计划。
+### 3.5 和 naive RAG 有什么区别？
 
-## 11. 表达红线
+naive RAG 通常是“问题 → top-k → prompt → answer”。当前项目增加了 routing、query 归一化、dense+sparse 融合、parent-child context、evidence gate、citation 约束和异步摄取。重点是把 RAG 做成可恢复、可解释的应用，而不只是 notebook demo。
 
-| 不要这样说 | 可审计说法 |
-|---|---|
-| “默认已接入 DeepSeek” | 默认是 deterministic mock；真实 provider override 未验收 |
-| “BGE-M3 已端到端跑通” | 只读挂载与 composition 已定义；真实推理未验收且存在 fallback |
-| “742 篇都已入库” | 742 是 records；仅 300 active，另有 441 rejected、1 failed |
-| “open access 就一定可用” | OA 只是发现条件；还需逐篇 JATS 许可 allowlist 门禁 |
-| “integration 证明 RAG 效果” | integration 只验证三存储和注入测试替身后的 contract |
-| “六条 public-eval 证明临床安全” | 它是 synthetic smoke set；dry-run 不调用服务 |
-| “五服务现在一直 healthy” | 仓库记录曾验收通过；本次检查没有运行中的 Compose 服务 |
-| “readiness 证明模型可用” | readiness 只检查应用 runtime 是否构造 |
-| “三存储是强事务” | 使用补偿式最终一致性，需要 orphan/状态对账 |
-| “前端整体覆盖率为 93.24%” | 该数值只对应 `vite.config.ts` 的 coverage include 范围 |
-| “npm audit 永久为零” | 本次基于当前 lockfile 与 advisory 数据库结果为 0，需持续复跑 |
-| “已经有 RAGAS、faithfulness 或临床效果数据” | 虽存在 `/v1/eval/ragas` legacy URL，但当前不运行 Ragas；返回的只是版本化 lexical compatibility fields |
-| “`context_precision`/`context_recall` 就是 Ragas 或答案质量” | 当前字段分别是 context-hit ratio 与 ground-truth token coverage 的样本宏平均，且忽略 response |
-| “public-eval 和 legacy endpoint 是同一个评估” | 两者是不同 contract；dry-run 不发 HTTP，live 与 legacy 结果也必须按各自定义解释 |
-| “本地 demo 可以直接上生产” | loopback demo 未覆盖 TLS、secret、权限、监控、容量和灾备 |
+---
 
-## 12. 证据索引与复现口径
+## 4. LangGraph / Agent 追问｜按需展开
 
-| 主题 | 主要证据 |
-|---|---|
-| 项目定位、验收边界 | `Readme.md` |
-| Compose 拓扑、存储职责、一致性 | `docs/ARCHITECTURE.md`、`docker-compose.yml` |
-| 演示与 mock/provider 边界 | `docs/DEMO.md` |
-| migration、worker、integration 运维口径 | `docs/RUNBOOK.md` |
-| Europe PMC、目标数、许可 allowlist | `config/corpus_sources.json`、`app/corpus/` |
-| SSE | `app/api/v1/chat.py`、`frontend/nginx.conf` |
-| 管理面 | `app/api/v1/admin.py`、`app/main.py` |
-| BGE fallback 与 worker composition | `app/retrieval/embeddings.py`、`app/worker/main.py` |
-| integration 6 项 | `scripts/compose_smoke.py`、`tests/integration/` |
-| public-eval 6 条及隔离边界 | `public_eval/`、`scripts/run_public_evaluation.py` |
-| 前端测试与 coverage 范围 | `frontend/package.json`、`frontend/vite.config.ts` |
+### 4.1 图里有哪些节点，State 传什么？
 
-本稿审计未读取仓库根环境文件、`data` 正文、任何 PDF、私有答案文件或 benchmark 内容。面试时应把“仓库定义”“历史验收”“本次复核”“尚未验收”四类证据明确分开。
+节点按功能可以记为：紧急检查、请求路由、归一化与指代消解、retrieval、证据充分性、generation preparation、output policy。State 保存原始问题、history、归一化 query、检索结果、citations、generation messages、trace 和最终 action。节点只更新自己负责的字段，条件边决定下一步。
+
+### 4.2 为什么提前路由？为什么不用 if/else？
+
+问候不需要检索，域外问题要说明边界，紧急情况要优先提示求助。提前路由能减少延迟和无意义模型调用。普通 if/else 可以实现，但分支多后会形成大函数；LangGraph 的优势是状态和路径显式，成本是额外学习与调试复杂度。
+
+### 4.3 项目有长期记忆吗？
+
+没有服务端长期 memory。前端把最近的 user/assistant history 随请求传回，图用它做规则式指代消解，生成时也可以带上历史。PostgreSQL 里的 session 主要用于管理员登录，不是聊天记忆；当前也没有启用 LangGraph checkpointer。
+
+### 4.4 如果升级成更强 Agent，会怎么做？
+
+只有需求明确时才加入受控工具，例如文献检索或结构化查询，并给每个工具设置 schema、权限、超时、最大调用次数和成本预算。医学场景应先保证可控和可评估，再考虑 planner、循环和更高自治度。
+
+---
+
+## 5. 文档摄取与数据架构追问｜按需展开
+
+### 5.1 为什么异步处理？当前解析支持什么？
+
+PDF 解析、chunking 和 embedding 可能很慢，放在上传请求里容易超时，也不方便重试，所以 API 只保存原件并建任务，worker 异步处理。管理上传支持 PDF、TXT 和 Markdown；TXT/Markdown 直接读取，PDF 走当前接线的解析路径并带 pypdf fallback。仓库里的 OCR/table 代码没有完整接入默认 worker，不能说默认链路已完整支持。
+
+### 5.2 staging → active 解决什么？
+
+向量写入不是瞬间完成的。worker 先写 staging，查询始终过滤 active；写完并核对数量后再激活，因此用户不会看到只写一半的索引。activation 与 PostgreSQL succeeded 仍不是跨系统原子操作，所以它解决的是可见性，不是分布式事务。
+
+### 5.3 lease、heartbeat 和 reclaim 怎么工作？
+
+worker claim 任务后记录 owner 和 lease，并用 heartbeat 续租。lease 过期的任务可以被其他 worker reclaim；一旦 reclaim 改写 owner，旧 worker 后续的数据库 stage/complete 更新会因 owner 不匹配被拒绝。需要准确说明：**仅仅过期但尚未被 reclaim，并不会形成硬 fencing**，Qdrant 写入本身也不携带数据库 fencing token，所以整体语义仍是 at-least-once。
+
+### 5.4 worker 失败和取消怎么处理？
+
+可重试异常进入 retry_wait，不可重试文件错误直接失败；reclaim 后可以重新执行。取消是在阶段边界检查，不是对所有底层调用的瞬时中断。特别是取消如果在 activation 已开始后到达，当前任务仍可能 finalize 为 succeeded，这是现有竞态，不能承诺“取消后绝不会完成”。
+
+### 5.5 三存储如何保持一致？
+
+项目使用补偿式最终一致性。上传时先写 MinIO，再在 PostgreSQL 建 document/job；数据库失败时尽力删除对象。摄取时先写 Qdrant staging，激活后再完成数据库状态。跨步骤崩溃时依赖幂等、reclaim 和后续清理；仍需要 orphan 对账，不能称 exactly-once 或强事务。
+
+---
+
+## 6. LLM、SSE 与后端工程追问｜按需展开
+
+### 6.1 默认为什么不用真实 LLM？如何接 DeepSeek？
+
+默认 demo 让任何人无需 Key、费用和模型权重也能跑通 UI、API、worker、retrieval 和 citation，并明确标注非模型生成。切换到 `openai_compatible` 后，后端 adapter 使用 endpoint、API key 和 model ID 发起流式请求。变量名保留 `DEEPSEEK_*`，协议本身是通用的。generation 与 embedding 是独立配置轴。
+
+> 如果你确实验证过本地 DeepSeek，可以说“我的本地演示环境已接通 DeepSeek API”；仍要补充“仓库默认是 demo”。
+
+### 6.2 每一轮都会调用模型吗？
+
+不会。只有最终进入 generate 且存在合格 citations 时才调用 LLM adapter，一轮生成对应一次 provider streaming request。问候、明显域外、紧急情况和证据不足都本地返回，从而减少成本和不必要风险。
+
+### 6.3 为什么使用 SSE，而不是 WebSocket？
+
+场景主要是服务端持续向浏览器单向发送状态、sources 和回答片段，SSE 已经足够，而且基于普通 HTTP，和 FastAPI、Nginx、浏览器更容易集成。WebSocket 更适合高频双向通信，但连接和协议管理更复杂。
+
+### 6.4 SSE contract 和取消怎么做？
+
+事件 envelope 带 request、session、sequence、event 和 data。前端会校验顺序、request/session 一致性、sources-before-token 和终止事件；AbortController 用于停止请求，后端也检查断连并关闭 generator。底层 provider 是否立即停止仍取决于客户端取消能力。
+
+### 6.5 处理轨迹和 token 是实时的吗？
+
+当前 trace 更准确地说是 graph 完成后的公开轨迹回放，不是节点执行时的实时 distributed tracing。真实 provider 输出也经过安全 buffer，所以是分段流式，不保证每个 raw token 原样立即到前端。
+
+---
+
+## 7. Evaluation、测试与安全追问｜按需展开
+
+### 7.1 怎么评估 RAG？
+
+要把 retrieval 和 generation 分开。retrieval 看正确文档或 chunk 是否进入 top-k，例如 Recall@K、MRR、NDCG；generation 再看正确性、faithfulness、相关性和 citation 支持度；系统层还要看 safety、延迟、错误率和成本。这样才能判断问题发生在哪一层。
+
+### 7.2 评估看板有什么用？为什么禁用？
+
+它用于管理离线评估和比较模型、embedding、prompt 或索引版本，不是聊天访问统计。当前创建功能返回 409，因为还没有经过审核的评估集、参考答案与证据标签，也没有完整 runner、指标校准和人工复核。与其永久排队或展示虚假成功率，项目选择 fail closed。
+
+### 7.3 当前 evaluation 能证明什么？
+
+`public_eval` 是 synthetic smoke 工具：dry-run 只检查 manifest、hash、schema 和输出形状；live run 才调用公开 chat API 并汇总基础指标。它适合验证评估管线，不代表真实模型或临床效果。历史兼容 URL 虽含 `ragas`，实际只是 lexical context overlap，没有运行真正的 Ragas、faithfulness 或 LLM Judge。
+
+### 7.4 正式 benchmark 怎么设计？
+
+先准备版本化问题集，每条包含相关 document/chunk、参考答案要点和 safety label；固定文档、embedding、检索参数、prompt 和模型版本；先评 retrieval，再评 answer 和 citation。LLM-as-a-Judge 可以辅助，但医学场景需要人工或专家抽样校准，并记录分母、失败数、延迟和成本。
+
+### 7.5 项目怎么测试？
+
+unit test 验证 routing、SSE 顺序、安全过滤、worker retry 和 visibility；integration test 连接真实 PostgreSQL、MinIO、Qdrant 验证跨组件 contract；前端测试 stream parser、reducer 和页面状态；Compose CI 检查配置和镜像构建。主 CI 不等于完整真实模型 E2E，因此不要用测试通过数代替 RAG 质量。
+
+### 7.6 医学安全和临床验证有什么区别？
+
+项目做的是工程安全策略：紧急请求提前路由、证据不足拒答、输出后处理和免责声明。当前确定性输出过滤主要覆盖选定的中文诊断、停药和剂量模式，并不是完整的中英文安全分类器。临床验证需要明确人群、金标准、专家评审和统计设计；当前项目没有完成这部分。
+
+---
+
+## 8. 项目难点、Trade-off 与优化方向
+
+### 8.1 为什么不是“接个 API 就结束”？
+
+真正影响结果的是整条链路：文档能否正确解析、chunk 是否合理、query/index embedding 是否一致、evidence 是否足够、citation 是否可追溯、任务失败后能否恢复。模型 API 只是 generation 的一个环节。
+
+### 8.2 为什么不做更简单的同步 Demo？
+
+同步上传和直接写向量库实现更快，但大文件会阻塞请求，失败难重试，半成品也可能被查到。queue + worker + staging/active 用更多复杂度换来可恢复性和可观察进度，这是项目最重要的工程 trade-off 之一。
+
+### 8.3 当前最大的不足是什么？
+
+默认环境更侧重工程复现，不是模型效果。默认 embedding 和生成都是 deterministic 路径；真实 BGE query/ingestion 尚未成为一键默认方案，正式 evaluator 也没有接通。下一步应先用受控数据建立基线，再决定换模型、调 chunk 还是加 reranker。
+
+### 8.4 如果再给两周，怎么安排？
+
+第一周完成真实 embedding 的 query/ingestion 一致配置和 retrieval benchmark；第二周接通 evaluation runner，增加 answer、citation、safety 和延迟评估，并做人工抽样。目标是得到可比较基线，而不是继续堆没有指标支撑的模型。
+
+### 8.5 当前有哪些技术债或设计纠偏？
+
+新 ChatService、LangGraph 和 SSE 外壳仍通过 adapter 复用已有 HybridRetriever，旧接口也还存在。渐进迁移降低了风险，但配置和命名较复杂，后续应统一 retrieval port 并逐步收口 legacy 路径。
+
+项目另一个值得学习的纠偏是：fallback 必须用真实 identity 标识，默认 worker 也必须真正启动。否则系统可能“名字像 BGE，实际是 hash”，或者上传任务一直 queued。
+
+【需要候选人根据真实经历补充】如果你参与了上述问题，请讲清现象、定位、改动和验证；如果只是学习过，就说“项目采用了这个改进，我重点分析了它解决的问题”。
+
+---
+
+## 9. 行为型项目问题
+
+### 9.1 为什么选择做这个项目？
+
+**推荐回答：**
+
+我不想只做一个“LLM API 加聊天页面”的 Demo，而是想把 RAG 应用从文档摄取、retrieval、workflow routing，一直做到 generation、citation、evaluation 和本地部署。选择癫痫作为垂直场景，是因为这里对证据可追溯、证据不足时拒答，以及 hallucination 控制都更有实际意义。我的目标不是做诊断系统，而是借这个场景把完整的 AI 应用工程链路真正跑通。
+
+### 9.2 你个人主要负责什么？
+
+**推荐回答：**
+
+我的角色更接近 product owner 加 AI application engineer。我负责定义项目目标、拆解需求、选择整体 workflow，并给每个阶段设定约束和验收标准；具体代码有很大一部分由 coding agent 辅助完成。我不会把 Agent 输出直接当成正确答案，而是检查代码结构、配置和运行结果，确认摄取、retrieval、LangGraph、Qdrant、worker、SSE 和 evaluation 是否真的接通。发现实现和文档不一致时，我会重新提出问题，让 Agent 修改，再通过测试和端到端操作验收。README、架构、Demo 流程和能力边界也是我持续整理和纠偏的部分。
+
+### 9.3 你学到最多的是什么？
+
+**推荐回答：**
+
+我学到最多的是，AI-assisted coding 并不会降低对系统理解的要求，反而提高了 review 的要求。Agent 生成的代码经常看起来合理，但一个类存在，不代表它接进了默认 runtime；名字叫 BGE 或 evaluation，也不代表后端真的用了真实模型或评估器。我需要对照配置、代码路径和端到端结果，检查 fallback 有没有被包装成真实能力。这个过程也让我认识到，AI 应用不只是 prompt engineering，数据摄取、检索质量、状态管理、可观测性、评估和故障恢复往往更决定系统是否可信。
+
+### 9.4 遇到 Bug 时怎么排查？
+
+**推荐回答：**
+
+我一般先复现用户能看到的现象，再按层定位，而不是一开始就让 Agent 随机改代码。比如上传文档后任务一直 queued，我先确认前端确实创建了 job，再检查 Compose 服务、worker 状态和任务 attempts，最后发现“上传逻辑存在”和“默认 runtime 有 worker 消费”是两回事。随后我让 coding agent 沿着 API、PostgreSQL queue 和 worker 入口定位并修改接线；我再重建服务、重新上传合成文档，确认任务走到 succeeded、Qdrant 索引变成 active，聊天能够引用后才接受修改。我的原则是每次修复都要回到可观察结果验证。
+
+### 9.5 有没有推翻过自己的设计？
+
+**推荐回答：**
+
+有。早期我更关注“功能有没有”和“页面能不能跑”，后来发现 RAG 项目里，能力名称和真实 runtime 同样重要：代码里定义了某个实现，不代表默认链路真的使用它；测试通过，也不代表模型质量；索引写入，也不代表应该立刻被查询。因此我把设计方向调整为更显式的 runtime mode、真实的 embedding identity、未配置能力 fail closed，以及 staging → active 的可见性边界。具体实现由 Agent 辅助迭代，我主要负责判断方案是否诚实、是否解决了原问题，以及最终验收。
+
+### 9.6 如果重新做一次，会改什么？
+
+**推荐回答：**
+
+如果重新做一次，我会更早建立 evaluation baseline，而不是先做很多功能，最后再问怎么衡量。第一步先准备小而版本化的 retrieval benchmark，标注 query 和 relevant chunk；第二步统一 ingestion 与 query 的 embedding identity；第三步记录 baseline 指标，再迭代 chunking、embedding、rerank 和 generation。同时我会从一开始就给 coding agent 写清输入、输出、失败行为和验收条件，不只检查“代码看起来实现了”。也就是从 feature-driven development 更早转向 evaluation-driven AI engineering。
+
+### 9.7 这个项目大量使用 AI Agent 开发，你怎么看？
+
+**推荐回答：**
+
+是的，coding agent 对这个项目的具体实现贡献很大，我也有意把它作为开发工具，因为 AI-assisted software development 本身就和我应聘的方向相关。但我的使用方式不是一句 prompt 让它一次生成整个项目，而是先拆任务、定义约束和 acceptance criteria，再让 Agent 实现。我会继续检查代码路径、配置、日志和运行结果，发现错误假设后让它迭代，并亲自完成最终验收。Agent 输出默认不可信；如果一个模块我解释不清，我就不会把它包装成自己的能力。我的体会是，Agent 提高了编码速度，但要把它用好，需要更强的系统理解和判断力，而不是更少。
+
+---
+
+## 10. 面试前一定别说错
+
+1. **默认不是 DeepSeek。** 默认是 deterministic evidence demo；本地可显式接 OpenAI-compatible provider。
+2. **默认 embedding 不是 BGE-M3。** 默认是 `deterministic-md5-tf-v2`；BGE profile 不等于完整端到端 BGE。
+3. **不要把 graph workflow 说成 fully autonomous Agent。** 当前没有自主 planning、任意工具循环或长期 memory。
+4. **citation 不等于答案必然正确。** 当前只约束特定格式引用的来源集合，不是 faithfulness 或临床证据等级证明。
+5. **synthetic evaluation 不等于模型或临床效果。** 历史 `ragas` URL 也没有运行真正 Ragas。
+6. **integration test 不等于 RAG quality benchmark。** 软件 contract 和模型效果是两件事。
+7. **三存储不是强事务，worker 也不是 exactly-once。** 当前是 lease、幂等、staging 和补偿式最终一致性。
+8. **不要声称临床验证或生产就绪。** 当前没有临床金标准、真实用户效果或完整生产安全与灾备结论。
+
+---
+
+## 11. 关键技术词速记
+
+| Term | 面试时怎么理解 |
+| --- | --- |
+| RAG | 先检索外部知识，再让生成过程基于这些 evidence 回答。 |
+| evidence | 本轮检索到、经过门控并允许进入回答上下文的文档片段。 |
+| embedding | 把文本变成可比较的数值表示；query 和 index 必须保持模型与维度一致。 |
+| dense retrieval | 用稠密表示找相似内容；默认 hash dense 不等于真实语义模型。 |
+| sparse retrieval | 用稀疏词项表示做匹配，适合关键词和专业术语。 |
+| RRF | 根据多路结果排名做融合，不要求原始分数在同一尺度。 |
+| rerank | 对初步召回结果再次排序；当前默认是 lexical rerank。 |
+| parent-child chunk | child 用于检索，parent text 用于提供更完整的生成上下文。 |
+| Qdrant | 项目中的 vector database，保存 vector、chunk payload 和 visibility。 |
+| LangGraph | 用 graph 和 state 编排 routing、retrieval、evidence gate 与 output policy。 |
+| evidence gate | 证据不满足条件时停止生成并拒答。 |
+| citation | 将回答里的 `[C1]` 等引用与本轮 sources 绑定。 |
+| SSE | 服务端通过一个 HTTP 连接持续向浏览器单向发送事件。 |
+| staging → active | 索引先不可见，确认完整后再开放检索。 |
+| lease | worker 的临时任务所有权；过期任务可被重新领取，但不是强 fencing token。 |
+| heartbeat | worker 定期续租，表示任务仍在处理。 |
+| reclaim | lease 过期后由其他 worker重新领取并改写 owner。 |
+| idempotency | 同一任务重复执行时尽量得到一致结果，不制造重复副作用。 |
+| compensation | 跨存储失败后通过回滚或清理补偿，而不是依赖分布式事务。 |
+| deterministic demo | 无需真实模型、结果可复现的默认工程演示模式。 |
+| OpenAI-compatible API | 可连接 DeepSeek 或其他兼容服务的统一模型调用协议。 |
+
+---
+
+## 最后复习提醒
+
+面试官真正想听的是：**为什么这样设计、解决了什么问题、有什么代价、你如何验证。**
+
+如果一段回答听起来像 README、审计报告或源码注释，就先删掉一半术语。先把问题讲清楚，再根据追问补充 LangGraph、RRF、lease、staging/active 等细节。

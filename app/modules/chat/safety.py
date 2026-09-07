@@ -4,6 +4,15 @@ import re
 from dataclasses import dataclass, field
 
 DISCLAIMER = "免责声明：本系统仅提供循证健康信息，不能替代医生面诊、诊断或处方。"
+DISCLAIMER_EN = (
+    "Disclaimer: This system provides evidence-oriented health information only; "
+    "it cannot replace an in-person medical assessment, diagnosis, or prescription."
+)
+
+
+def disclaimer_for_language(language: str) -> str:
+    return DISCLAIMER if language == "zh" else DISCLAIMER_EN
+
 
 _CITATION = re.compile(r"\[C(\d+)\]")
 _DIRECT_DIAGNOSIS = re.compile(
@@ -97,7 +106,11 @@ class SafeSegmentBuffer:
         parts = _SENTENCE_BOUNDARY.split(self._buffer)
         if len(parts) > 1:
             self._buffer = parts.pop()
-        ready = [part for part in parts if part]
+            ready = [part for part in parts if part]
+        else:
+            # A trailing partial sentence must stay buffered until a boundary,
+            # max_chars flush, or finish(); returning it here would emit it twice.
+            ready = []
         while len(self._buffer) >= self.max_chars:
             ready.append(self._buffer[: self.max_chars])
             self._buffer = self._buffer[self.max_chars :]

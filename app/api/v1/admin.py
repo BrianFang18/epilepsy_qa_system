@@ -219,9 +219,16 @@ def cancel_ingestion_job(
 @router.post("/evaluations", response_model=EvaluationJobResponse, status_code=202)
 def create_evaluation(
     payload: EvaluationCreateRequest,
+    request: Request,
     session: Annotated[AdminSessionResponse, Depends(_require_admin)],
     service: Annotated[AdminApplication, Depends(_service_from)],
 ) -> EvaluationJobResponse:
+    settings = getattr(request.app.state, "settings", None)
+    if not bool(getattr(settings, "evaluation_runner_enabled", False)):
+        raise HTTPException(
+            status_code=409,
+            detail="Evaluation runner is not configured; no metrics were generated",
+        )
     return _call(
         lambda: service.create_evaluation(
             name=payload.name,

@@ -17,12 +17,12 @@ export function ChatPage() {
                 癫痫循证问答助手
               </Typography.Title>
               <Typography.Text type="secondary" className="text-xs sm:text-sm">
-                本地 Agentic RAG 演示 · 回答基于可追溯证据
+                本地证据优先 · 问候与域外问题不会误进 RAG · 回答按提问语言返回
               </Typography.Text>
             </div>
           </div>
           <Tag color="cyan" icon={<SafetyCertificateOutlined />}>
-            隐私会话
+            运行模式实时标注
           </Tag>
         </div>
       </header>

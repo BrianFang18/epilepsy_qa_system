@@ -181,9 +181,15 @@ export function ChatWorkspace() {
             text={healthText}
           />
           {readiness.isFetching && !readiness.isPending && <LoadingOutlined />}
-          <Tag icon={<SafetyCertificateOutlined />} color="cyan">
-            当前标签页临时会话 · 30 分钟无操作自动清除
+          <Tag
+            icon={<SafetyCertificateOutlined />}
+            color={readiness.data?.chat_mode === 'openai_compatible' ? 'green' : 'gold'}
+          >
+            {readiness.data?.chat_mode === 'openai_compatible'
+              ? '真实模型 · OpenAI-compatible'
+              : '确定性 Demo · 非模型生成'}
           </Tag>
+          <Tag color="cyan">当前标签页临时会话 · 30 分钟无操作自动清除</Tag>
         </Space>
         <Space wrap>
           {(readiness.isError || !chatReady) && !readiness.isPending && (

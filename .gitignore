@@ -93,3 +93,9 @@ Thumbs.db
 
 # OCR local artifacts
 ocr_output/
+
+# Local UI captures may contain unverified runtime or medical claims.
+docs/images/Epilepsy_QA_system.png
+
+# Local AI review reports are temporary pre-commit artifacts.
+semantic-review/

@@ -7,7 +7,12 @@ from ...config import Settings
 from .errors import LLMUnavailableError
 from .graph import ChatGraph
 from .ports import LLMStreamPort, RetrieverPort
-from .safety import DISCLAIMER, HiddenReasoningFilter, SafeSegmentBuffer, sanitize_segment
+from .safety import (
+    HiddenReasoningFilter,
+    SafeSegmentBuffer,
+    disclaimer_for_language,
+    sanitize_segment,
+)
 from .schemas import ChatRequest, ChatStreamEvent
 
 
@@ -20,7 +25,12 @@ class ChatService:
     async def stream(self, request: ChatRequest) -> AsyncIterator[ChatStreamEvent]:
         yield ChatStreamEvent(
             event="meta",
-            data={"stream_version": "1", "trace_level": request.trace_level},
+            data={
+                "stream_version": "1",
+                "trace_level": request.trace_level,
+                "chat_mode": self._settings.chat_llm_mode,
+                "model_generation_enabled": self._settings.chat_llm_mode == "openai_compatible",
+            },
         )
         history = [item.model_dump() for item in request.history]
         state = await self._graph.run(message=request.message, history=history)
@@ -48,6 +58,15 @@ class ChatService:
             yield ChatStreamEvent(
                 event="done", data={"finish_reason": "emergency", "citation_count": 0}
             )
+            return
+
+        if action in {"greeting", "out_of_scope"}:
+            if action == "out_of_scope":
+                yield ChatStreamEvent(
+                    event="safety", data={"level": "info", "code": "OUT_OF_SCOPE"}
+                )
+            yield ChatStreamEvent(event="token", data={"content": state.get("local_answer", "")})
+            yield ChatStreamEvent(event="done", data={"finish_reason": action, "citation_count": 0})
             return
 
         if action != "generate" or not citations:
@@ -107,13 +126,15 @@ class ChatService:
 
         if emitted_chars == 0:
             raise LLMUnavailableError()
-        yield ChatStreamEvent(event="token", data={"content": f"\n\n{DISCLAIMER}"})
+        disclaimer = disclaimer_for_language(state.get("language", "zh"))
+        yield ChatStreamEvent(event="token", data={"content": f"\n\n{disclaimer}"})
         yield ChatStreamEvent(
             event="done",
             data={
                 "finish_reason": "stop",
                 "citation_count": len(citations),
                 "safety_adjustments": len(emitted_codes),
+                "chat_mode": self._settings.chat_llm_mode,
             },
         )
 

@@ -1,10 +1,17 @@
 FROM python:3.11.11-slim-bookworm AS builder
 
+# Defaults remain the official repositories. Operators on constrained networks may
+# override these values with docker/Compose --build-arg without editing this file.
+ARG DEBIAN_MIRROR=http://deb.debian.org
+ARG PIP_INDEX_URL=https://pypi.org/simple
+
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
     VIRTUAL_ENV=/opt/venv
 
-RUN apt-get update \
+RUN sed -i "s|http://deb.debian.org|${DEBIAN_MIRROR}|g" \
+        /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
     && apt-get install --yes --no-install-recommends build-essential \
     && rm -rf /var/lib/apt/lists/* \
     && python -m venv "${VIRTUAL_ENV}"
@@ -13,7 +20,10 @@ ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 WORKDIR /build
 
 COPY pyproject.toml requirements.txt ./
-COPY app ./app
+# Dependency resolution only needs package metadata and a minimal package marker.
+# The full application is copied into the runtime stage below, so ordinary source
+# edits no longer invalidate the expensive model/runtime dependency layer.
+COPY app/__init__.py ./app/__init__.py
 
 # requirements.txt deliberately installs .[runtime]. The shared API/worker/migrate
 # image therefore contains Qdrant, LLM, embedding, and parser dependencies; the
@@ -29,6 +39,8 @@ RUN python -m pip install \
 
 FROM python:3.11.11-slim-bookworm AS runtime
 
+ARG DEBIAN_MIRROR=http://deb.debian.org
+
 ENV DEBIAN_FRONTEND=noninteractive \
     HOME=/home/appuser \
     PATH="/opt/venv/bin:${PATH}" \
@@ -38,7 +50,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # libgomp supports the CPU model runtime. The parser has a pypdf fallback, while
 # poppler/tesseract keep the declared document runtime usable without curl.
-RUN apt-get update \
+RUN sed -i "s|http://deb.debian.org|${DEBIAN_MIRROR}|g" \
+        /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
     && apt-get install --yes --no-install-recommends \
         ca-certificates \
         libglib2.0-0 \
@@ -88,60 +102,12 @@ if __name__ == "__main__":
     main()
 PY
 
-# app.main's legacy LLM honors MOCK_MODE, while its streaming chat adapter does
-# not. This container-only bridge injects that existing deterministic mock into
-# the stream port so the development API needs no fabricated provider key.
-COPY --chmod=0555 <<PY /opt/container/serve-existing-mock
-#!/usr/bin/env python3
-from __future__ import annotations
-
-
-class ExistingMockStreamPort:
-    def __init__(self, client: object) -> None:
-        self._client = client
-
-    async def stream(
-        self,
-        messages: list[dict[str, str]],
-        *,
-        temperature: float,
-        max_tokens: int,
-    ):
-        yield self._client.chat(
-            messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-
-    async def close(self) -> None:
-        return None
-
-
-def main() -> None:
-    import uvicorn
-
-    from app.config import get_settings
-    from app.llm.llm_client import LLMClient
-    from app.main import create_app
-
-    settings = get_settings()
-    if not settings.mock_mode:
-        raise RuntimeError(
-            "the default container API requires MOCK_MODE=true; use app.main:app only "
-            "when a real streaming LLM provider is configured"
-        )
-    llm = ExistingMockStreamPort(LLMClient(settings))
-    application = create_app(settings=settings, llm=llm)
-    uvicorn.run(application, host=settings.host, port=settings.port)
-
-
-if __name__ == "__main__":
-    main()
-PY
-
+# app.main selects the streaming chat backend from CHAT_LLM_MODE. Demo mode uses
+# an explicit evidence-excerpt renderer; openai_compatible mode fails startup
+# when its backend-only provider configuration is missing.
 USER appuser
 
 EXPOSE 8010
 STOPSIGNAL SIGTERM
 
-CMD ["/opt/container/with-database-url", "/opt/container/serve-existing-mock"]
+CMD ["/opt/container/with-database-url", "python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8010"]

@@ -451,7 +451,10 @@ def test_admin_http_api_cookie_permissions_upload_and_evaluation(
     settings_factory: Any,
     fake_service_factory: Any,
 ) -> None:
-    settings = settings_factory(enable_admin_api=False)
+    settings = settings_factory(
+        enable_admin_api=False,
+        evaluation_runner_enabled=True,
+    )
     legacy_service = fake_service_factory(settings)
     application = create_app(
         settings=settings,

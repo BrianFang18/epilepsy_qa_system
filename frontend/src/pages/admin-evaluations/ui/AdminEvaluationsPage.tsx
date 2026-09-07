@@ -31,6 +31,7 @@ import {
 } from '../../../features/admin-evaluations/model/useAdminEvaluations';
 import { formatDateTime, formatMetric } from '../../../shared/lib/format';
 
+const EVALUATION_RUNNER_CONFIGURED = false;
 const SUITE_LABELS: Record<EvaluationSuite, string> = {
   smoke: '冒烟检查',
   retrieval: '检索评估',
@@ -53,6 +54,7 @@ export default function AdminEvaluationsPage() {
   useRedirectOnUnauthorized(evaluations.error ?? summary.error ?? create.error);
 
   const submit = async (values: EvaluationValues) => {
+    if (!EVALUATION_RUNNER_CONFIGURED) return;
     try {
       await create.mutateAsync({ name: values.name.trim(), suite: values.suite });
       form.resetFields();
@@ -105,6 +107,19 @@ export default function AdminEvaluationsPage() {
         ),
     },
     {
+      title: '执行结果',
+      key: 'error',
+      width: 220,
+      render: (_, item) =>
+        item.error_code || item.error_message ? (
+          <Typography.Text type="danger">
+            {item.error_code ?? item.error_message}
+          </Typography.Text>
+        ) : (
+          <Typography.Text type="secondary">—</Typography.Text>
+        ),
+    },
+    {
       title: '创建时间',
       dataIndex: 'created_at',
       width: 180,
@@ -121,20 +136,27 @@ export default function AdminEvaluationsPage() {
           评估看板
         </Typography.Title>
         <Typography.Text type="secondary">
-          页面只展示聚合指标；评估答案、ground truth 与完整上下文不会返回浏览器。
+          用受控测试集衡量检索、生成与安全表现；它不是文档摄取，也不是聊天记录统计。
         </Typography.Text>
       </div>
+
+      <Alert
+        type="warning"
+        showIcon
+        message="当前没有配置真实评估执行器"
+        description="创建入口已禁用，API 也会拒绝新任务，避免生成永远排队或看似真实的伪指标。下方仅保留历史任务和聚合结果；仓库中的 public evaluation dry-run 是独立的合成结构校验，不等于模型质量评估。"
+      />
 
       <Alert
         type="info"
         showIcon
         message="隐私边界"
-        description="敏感评估明细仅可写入私有对象存储，PostgreSQL 与本页面只保留汇总数值。"
+        description="未来接入评估器后，敏感评估明细也只可写入私有对象存储；PostgreSQL 与本页面只保留汇总数值。"
       />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
-          <Statistic title="评估总数" value={summary.data?.total ?? 0} />
+          <Statistic title="历史评估任务" value={summary.data?.total ?? 0} />
         </Card>
         {Object.entries(summary.data?.status_counts ?? {})
           .slice(0, 3)
@@ -153,12 +175,16 @@ export default function AdminEvaluationsPage() {
             ))}
           </div>
         ) : (
-          <Empty description="尚无已完成的聚合指标" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          <Empty
+            description="尚无真实评估器产生的聚合指标"
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+          />
         )}
       </Card>
 
-      <Card title="创建评估任务">
+      <Card title="创建评估任务（未配置）">
         <Form<EvaluationValues>
+          disabled={!EVALUATION_RUNNER_CONFIGURED}
           form={form}
           initialValues={{ suite: 'smoke' }}
           layout="vertical"
@@ -173,7 +199,7 @@ export default function AdminEvaluationsPage() {
                 { max: 255 },
               ]}
             >
-              <Input placeholder="例如：公开测试集冒烟评估" />
+              <Input placeholder="接入真实 evaluator 后才可创建" />
             </Form.Item>
             <Form.Item label="评估套件" name="suite" rules={[{ required: true }]}>
               <Select
@@ -185,12 +211,13 @@ export default function AdminEvaluationsPage() {
             </Form.Item>
             <Form.Item label=" ">
               <Button
+                disabled
                 htmlType="submit"
                 icon={<PlayCircleOutlined />}
                 loading={create.isPending}
                 type="primary"
               >
-                加入队列
+                未配置执行器
               </Button>
             </Form.Item>
           </div>
@@ -200,7 +227,7 @@ export default function AdminEvaluationsPage() {
         ) : null}
       </Card>
 
-      <Card title="评估记录">
+      <Card title="历史评估记录">
         {evaluations.error ? (
           <Alert className="mb-4" type="error" showIcon message={evaluations.error.message} />
         ) : null}
@@ -216,7 +243,7 @@ export default function AdminEvaluationsPage() {
             onChange: setPage,
           }}
           rowKey="id"
-          scroll={{ x: 850 }}
+          scroll={{ x: 1050 }}
         />
       </Card>
     </Space>

@@ -57,6 +57,7 @@ class IngestionIndexer:
             sparse_vectors=sparse_vectors,
         )
 
+        backend_version = str(getattr(self.embedder, "backend_version", "")).strip()
         indexed = [
             IndexedChunk(
                 chunk_id=chunk.chunk_id,
@@ -66,7 +67,11 @@ class IngestionIndexer:
                 doc_type=chunk.doc_type,
                 text=chunk.text,
                 parent_text=chunk.parent_text,
-                metadata=chunk.metadata,
+                metadata=(
+                    {**chunk.metadata, "embedding_backend": backend_version}
+                    if backend_version
+                    else chunk.metadata
+                ),
                 dense_vector=dense,
                 sparse_vector=sparse,
             )

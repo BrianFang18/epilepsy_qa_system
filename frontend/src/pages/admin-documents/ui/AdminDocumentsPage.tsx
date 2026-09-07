@@ -196,9 +196,15 @@ export default function AdminDocumentsPage() {
           文档摄取
         </Typography.Title>
         <Typography.Text type="secondary">
-          原件进入 MinIO，状态与任务保存在 PostgreSQL，解析和索引由独立 Worker 完成。
+          把 PDF、TXT 或 Markdown 变成聊天可检索的证据，而不是把文件直接交给模型。
         </Typography.Text>
       </div>
+      <Alert
+        type="info"
+        showIcon
+        message="上传后会自动经过 6 个阶段"
+        description="原件先保存到 MinIO，并在 PostgreSQL 创建队列任务；默认 worker 随 Compose 自动启动，随后执行解析、父子分块、确定性 MD5-token/TF 向量化、写入 Qdrant 和激活。该默认向量后端用于本地 Demo，不是 BGE-M3。短暂显示“排队中”正常；若长时间保持尝试 0/3，请检查 worker 容器和日志。"
+      />
       <Card title="上传完整资料" extra={<CloudUploadOutlined className="text-teal-700" />}>
         <Form<UploadValues>
           form={form}

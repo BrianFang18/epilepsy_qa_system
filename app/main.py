@@ -268,10 +268,13 @@ def create_app(
         admin_enabled = bool(runtime_settings is not None and runtime_settings.enable_admin_api)
         admin_ready = getattr(request.app.state, "admin_service", None) is not None
         dependencies_ready = legacy_ready and chat_ready and (not admin_enabled or admin_ready)
+        chat_mode = runtime_settings.chat_llm_mode if runtime_settings is not None else None
         return {
             "status": "ready" if dependencies_ready else "degraded",
             "legacy_ready": legacy_ready,
             "chat_ready": chat_ready,
+            "chat_mode": chat_mode,
+            "model_generation_enabled": chat_mode == "openai_compatible",
             "admin_enabled": admin_enabled,
             "admin_ready": admin_ready,
         }

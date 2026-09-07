@@ -11,6 +11,8 @@ x-backend-service: &backend-service
   init: true
   networks:
     - app
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
   logging:
     driver: json-file
     options:
@@ -24,11 +26,13 @@ x-app-environment: &app-environment
   CORS_ORIGINS: "${CORS_ORIGINS:-[\"http://localhost:8080\",\"http://127.0.0.1:8080\"]}"
   ENABLE_V2_WORKFLOW: "false"
   ENABLE_ADMIN_API: "${ENABLE_ADMIN_API:-true}"
+  EVALUATION_RUNNER_ENABLED: "${EVALUATION_RUNNER_ENABLED:-false}"
   SEED_DEMO_DATA: "false"
   MOCK_MODE: "${MOCK_MODE:-true}"
   USE_QDRANT: "${USE_QDRANT:-true}"
   QDRANT_URL: "http://qdrant:6333"
   QDRANT_COLLECTION: "${QDRANT_COLLECTION:-epilepsy_hybrid_docs}"
+  INGESTION_EMBEDDING_BACKEND: "${INGESTION_EMBEDDING_BACKEND:-deterministic}"
   POSTGRES_DB: "${POSTGRES_DB:?Set POSTGRES_DB in config/compose.env.example}"
   POSTGRES_USER: "${POSTGRES_USER:?Set POSTGRES_USER in config/compose.env.example}"
   POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in config/compose.env.example}"
@@ -135,9 +139,21 @@ services:
     <<: *backend-service
     command:
       - /opt/container/with-database-url
-      - /opt/container/serve-existing-mock
+      - python
+      - -m
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8010"
     restart: unless-stopped
-    environment: *app-environment
+    environment:
+      <<: *app-environment
+      CHAT_LLM_MODE: "${CHAT_LLM_MODE:-demo}"
+      DEEPSEEK_BASE_URL: "${DEEPSEEK_BASE_URL:-}"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+      DEEPSEEK_MODEL: "${DEEPSEEK_MODEL:-}"
     ports:
       - "127.0.0.1:8010:8010"
     depends_on:
@@ -163,6 +179,76 @@ services:
     mem_limit: 3g
     cpus: "2.0"
     pids_limit: 512
+
+  worker:
+    <<: *backend-service
+    command:
+      - /opt/container/with-database-url
+      - python
+      - -m
+      - app.worker.main
+    restart: unless-stopped
+    environment:
+      <<: *app-environment
+      MOCK_MODE: "true"
+      INGESTION_EMBEDDING_BACKEND: "deterministic"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    stop_grace_period: 45s
+    mem_limit: 3g
+    cpus: "2.0"
+    pids_limit: 512
+
+  worker-bge:
+    <<: *backend-service
+    profiles: ["bge-ingestion"]
+    command:
+      - sh
+      - -ec
+      - |
+        test -r /models/bge-m3/config.json || {
+          echo >&2 "bge-ingestion profile requires a readable BGE model at /models/bge-m3";
+          exit 64;
+        }
+        test -n "$(find /models/bge-m3 -maxdepth 1 -type f \( -name '*.safetensors' -o -name 'pytorch_model*.bin' \) -print -quit)" || {
+          echo >&2 "BGE model weights were not found in /models/bge-m3";
+          exit 64;
+        }
+        exec /opt/container/with-database-url python -m app.worker.main
+    restart: "on-failure:3"
+    environment:
+      <<: *app-environment
+      MOCK_MODE: "false"
+      INGESTION_EMBEDDING_BACKEND: "bge_m3"
+      EMBED_MODEL_NAME: "${EMBED_MODEL_NAME:-BAAI/bge-m3}"
+      EMBED_MODEL_PATH: "/models/bge-m3"
+    volumes:
+      - type: bind
+        source: "${EMBED_MODEL_PATH:?Set EMBED_MODEL_PATH to an absolute host BGE model directory in config/compose.env.example}"
+        target: /models/bge-m3
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    stop_grace_period: 45s
+    mem_limit: 6g
+    cpus: "4.0"
+    pids_limit: 1024
 
   frontend:
     image: epilepsy-qa-frontend:node20.11.0-nginx1.27.3
@@ -192,49 +278,6 @@ services:
       options:
         max-size: 10m
         max-file: "3"
-
-  worker:
-    <<: *backend-service
-    profiles: ["ingestion"]
-    command:
-      - sh
-      - -ec
-      - |
-        test -r /models/bge-m3/config.json || {
-          echo >&2 "ingestion profile requires a readable BGE model mounted at /models/bge-m3";
-          exit 64;
-        }
-        test -n "$(find /models/bge-m3 -maxdepth 1 -type f \( -name '*.safetensors' -o -name 'pytorch_model*.bin' \) -print -quit)" || {
-          echo >&2 "BGE model weights were not found in /models/bge-m3";
-          exit 64;
-        }
-        exec /opt/container/with-database-url python -m app.worker.main
-    restart: "on-failure:3"
-    environment:
-      <<: *app-environment
-      MOCK_MODE: "false"
-      EMBED_MODEL_NAME: "${EMBED_MODEL_NAME:-BAAI/bge-m3}"
-      EMBED_MODEL_PATH: "/models/bge-m3"
-    volumes:
-      - type: bind
-        source: "${EMBED_MODEL_PATH:?Set EMBED_MODEL_PATH to an absolute host BGE model directory in config/compose.env.example}"
-        target: /models/bge-m3
-        read_only: true
-        bind:
-          create_host_path: false
-    depends_on:
-      postgres:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-      qdrant:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-    stop_grace_period: 45s
-    mem_limit: 6g
-    cpus: "4.0"
-    pids_limit: 1024
 
 volumes:
   postgres_data:

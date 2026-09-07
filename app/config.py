@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -21,8 +22,10 @@ class Settings(BaseSettings):
     enable_admin_api: bool = False
     seed_demo_data: bool = False
 
-    # 为 true 时，LLM 与检索走本地可预测的 mock 逻辑。
+    # 旧版同步 LLM、query rewrite 与 embedding/reranker 的 fallback 开关。
+    # 新流式聊天由 chat_llm_mode 单独控制，避免 embedding 与 LLM 状态耦合。
     mock_mode: bool = False
+    chat_llm_mode: Literal["demo", "openai_compatible"] = "demo"
 
     # OpenAI 兼容接口配置（vLLM 默认提供该协议）。
     llm_api_base: str = "http://127.0.0.1:8000/v1"
@@ -31,7 +34,7 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.2
     llm_max_tokens: int = 1024
 
-    # 新流式 chat 使用独立的 OpenAI 兼容配置；未设置时兼容旧 LLM 配置。
+    # 新流式 chat 使用独立的 OpenAI 兼容配置；真实模式三项都必须显式设置。
     deepseek_base_url: str | None = None
     deepseek_api_key: str | None = None
     deepseek_model: str | None = None
@@ -82,6 +85,7 @@ class Settings(BaseSettings):
     # 摄取流水线版本组成幂等键，升级任一版本都会生成新的不可变文档版本。
     ingestion_parser_version: str = "mineru-parser-v1"
     ingestion_chunker_version: str = "parent-child-v1"
+    ingestion_embedding_backend: Literal["deterministic", "bge_m3"] = "bge_m3"
     ingestion_index_version: str = "qdrant-hybrid-rrf-v1"
 
     # PostgreSQL job 队列与 worker lease。
@@ -91,6 +95,8 @@ class Settings(BaseSettings):
     worker_max_attempts: int = Field(default=3, ge=1, le=10)
     worker_retry_base_seconds: int = Field(default=30, ge=1, le=3600)
     evaluation_max_attempts: int = Field(default=2, ge=1, le=10)
+    # 只有部署了受控 evaluator 时才能开启；所有运行方式默认关闭。
+    evaluation_runner_enabled: bool = False
 
     # 向量模型本地路径。
     embed_model_name: str = "BAAI/bge-m3"
